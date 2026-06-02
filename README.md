@@ -62,22 +62,39 @@ em <http://127.0.0.1:3000>.
 cargo run
 ```
 
-Exemplos (no PowerShell use `curl.exe`, pois `curl` é um alias do
-`Invoke-WebRequest`):
+No PowerShell, a forma mais confiável é o `Invoke-RestMethod` (sem as dores de
+cabeça de aspas do `curl`); ele ainda já desserializa a resposta JSON:
 
 ```powershell
+$admin = @{ Authorization = "I'm the admin" }
+
 # listar
-curl.exe http://127.0.0.1:3000/api/assets
+Invoke-RestMethod http://127.0.0.1:3000/api/assets
 
 # cadastrar (admin)
-curl.exe -X POST http://127.0.0.1:3000/api/assets `
-  -H "Authorization: I'm the admin" -H "Content-Type: application/json" `
-  -d '{\"name\":\"bitcoin\",\"unit_value\":10}'
+Invoke-RestMethod -Method Post http://127.0.0.1:3000/api/assets -Headers $admin `
+  -ContentType 'application/json' -Body '{"name":"bitcoin","unit_value":10}'
 
 # atualizar (admin)
+Invoke-RestMethod -Method Patch http://127.0.0.1:3000/api/assets -Headers $admin `
+  -ContentType 'application/json' -Body '{"id":1,"unit_value":20}'
+```
+
+Com `curl.exe` também funciona (lembre que `curl` puro é um alias do
+`Invoke-WebRequest`). Use aspas **simples** no JSON e **não** escape as aspas
+internas com `\`: no PowerShell as aspas simples já são literais, então o `\`
+iria parar no corpo e quebrar o JSON.
+
+```powershell
+curl.exe http://127.0.0.1:3000/api/assets
+
+curl.exe -X POST http://127.0.0.1:3000/api/assets `
+  -H "Authorization: I'm the admin" -H "Content-Type: application/json" `
+  -d '{"name":"bitcoin","unit_value":10}'
+
 curl.exe -X PATCH http://127.0.0.1:3000/api/assets `
   -H "Authorization: I'm the admin" -H "Content-Type: application/json" `
-  -d '{\"id\":1,\"unit_value\":20}'
+  -d '{"id":1,"unit_value":20}'
 ```
 
 > **Windows / TLS:** o `cargo` pode falhar ao baixar dependências com o erro
