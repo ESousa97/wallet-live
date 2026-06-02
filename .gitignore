@@ -1,0 +1,4 @@
+/target
+
+# Variáveis de ambiente locais (ex.: DATABASE_URL). Veja .env.example.
+.env

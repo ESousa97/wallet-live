@@ -1,0 +1,6 @@
+# Workaround para Windows: em algumas redes o cargo falha ao baixar
+# dependências com o erro `CRYPT_E_NO_REVOCATION_CHECK` porque o schannel não
+# consegue verificar a revogação do certificado. Isso desativa apenas a
+# checagem de revogação para os downloads do cargo (não afeta o programa final).
+[http]
+check-revoke = false
