@@ -2,6 +2,7 @@ mod app;
 pub mod auth;
 mod error;
 pub mod models;
+pub mod repository;
 pub mod routes;
 
 // A main fica o mais enxuta possível: o tokio::main cria um runtime assíncrono

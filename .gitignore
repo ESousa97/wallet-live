@@ -2,3 +2,6 @@
 
 # Variáveis de ambiente locais (ex.: DATABASE_URL). Veja .env.example.
 .env
+
+# Snapshots pendentes do insta (os aceitos, .snap, são versionados).
+*.snap.new

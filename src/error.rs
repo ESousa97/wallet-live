@@ -4,8 +4,7 @@ use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 
-/// Todos os erros possíveis da aplicação reunidos num único enum. Cada variante
-/// ganha sua representação em string pelo atributo `#[error(...)]` do thiserror.
+/// Todos os erros possíveis da aplicação reunidos num único enum.
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("missing authorization header")]
@@ -14,6 +13,10 @@ pub enum AppError {
     InvalidCredentials,
     #[error("asset does not exist")]
     AssetDoesNotExist,
+    // `transparent` delega Display/source ao erro interno; `#[from]` gera a
+    // conversão automática, então um erro de SQLx vira AppError com `?`.
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
 }
 
 /// Formato JSON de um erro devolvido pela API.
@@ -33,6 +36,8 @@ impl IntoResponse for AppError {
             AppError::MissingAuthorization => StatusCode::BAD_REQUEST,
             AppError::InvalidCredentials => StatusCode::UNAUTHORIZED,
             AppError::AssetDoesNotExist => StatusCode::NOT_FOUND,
+            // Algo inesperado aconteceu no banco: erro interno do servidor.
+            AppError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
         (status, Json(error_response)).into_response()

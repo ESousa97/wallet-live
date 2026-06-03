@@ -1,0 +1,11 @@
+---
+source: src/routes/api.rs
+expression: assets
+---
+[
+  {
+    "id": 1,
+    "name": "bitcoin",
+    "unit_value": 10.0
+  }
+]

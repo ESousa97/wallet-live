@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      # Volume nomeado para não perder os dados ao descer o banco.
+      # No Postgres 18+ o mount vai em /var/lib/postgresql (os dados ficam
+      # numa subpasta versionada), e não mais em /var/lib/postgresql/data.
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  pgdata:

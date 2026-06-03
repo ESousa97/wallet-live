@@ -1,4 +1,3 @@
-use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -8,9 +7,10 @@ use crate::app::AppState;
 use crate::auth::admin::Admin;
 use crate::error::AppError;
 use crate::models::Asset;
+use crate::repository::Repository;
 
-/// Monta as rotas da API. O estado ainda não é fornecido aqui — só declaramos,
-/// pelo tipo de retorno `Router<AppState>`, que este router espera um estado.
+/// Monta as rotas da API. O router ainda espera um `AppState` (de onde o
+/// `Repository` é extraído).
 pub fn router() -> Router<AppState> {
     Router::new().route(
         "/assets",
@@ -18,11 +18,11 @@ pub fn router() -> Router<AppState> {
     )
 }
 
-/// Lista todos os ativos cadastrados.
+/// Lista todos os ativos.
 #[instrument(skip_all)]
-async fn list_assets(State(state): State<AppState>) -> Json<Vec<Asset>> {
-    let assets = state.assets.lock().await;
-    Json(assets.values().cloned().collect())
+async fn list_assets(repository: Repository) -> Result<Json<Vec<Asset>>, AppError> {
+    let assets = repository.list_assets().await?;
+    Ok(Json(assets))
 }
 
 #[derive(Deserialize)]
@@ -34,30 +34,14 @@ struct CreateAssetRequest {
 /// Cadastra um novo ativo. Protegido: exige o `Admin`.
 #[instrument(skip_all)]
 async fn create_asset(
-    State(state): State<AppState>,
     _admin: Admin,
+    repository: Repository,
     Json(request): Json<CreateAssetRequest>,
-) -> Json<Asset> {
-    let mut assets = state.assets.lock().await;
-
-    // Sem banco de dados ainda: o próximo id é o maior existente + 1
-    // (defaulta para 0 + 1 quando não há nenhum ativo).
-    let id = assets
-        .values()
-        .map(|asset| asset.id)
-        .max()
-        .unwrap_or_default()
-        + 1;
-
-    let new_asset = Asset {
-        id,
-        name: request.name,
-        unit_value: request.unit_value,
-    };
-
-    assets.insert(new_asset.id, new_asset.clone());
-
-    Json(new_asset)
+) -> Result<Json<Asset>, AppError> {
+    let new_asset = repository
+        .create_asset(request.name, request.unit_value)
+        .await?;
+    Ok(Json(new_asset))
 }
 
 #[derive(Deserialize)]
@@ -71,23 +55,68 @@ struct UpdateAssetRequest {
 /// opcionais — só os campos enviados são alterados.
 #[instrument(skip_all)]
 async fn update_asset(
-    State(state): State<AppState>,
     _admin: Admin,
+    repository: Repository,
     Json(request): Json<UpdateAssetRequest>,
 ) -> Result<Json<Asset>, AppError> {
-    let mut assets = state.assets.lock().await;
+    let updated_asset = repository
+        .update_asset(request.id, request.name, request.unit_value)
+        .await?;
 
-    let existing_asset = assets
-        .get_mut(&request.id)
-        .ok_or(AppError::AssetDoesNotExist)?;
+    match updated_asset {
+        Some(updated_asset) => Ok(Json(updated_asset)),
+        None => Err(AppError::AssetDoesNotExist),
+    }
+}
 
-    if let Some(new_name) = request.name {
-        existing_asset.name = new_name;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test]
+    async fn test_create_asset(db: sqlx::PgPool) {
+        let request = CreateAssetRequest {
+            name: "bitcoin".to_string(),
+            unit_value: 10.0,
+        };
+
+        let Json(new_asset) = create_asset(Admin, db.into(), Json(request))
+            .await
+            .expect("success");
+
+        assert_eq!(new_asset.id, 1);
+        assert_eq!(new_asset.name, "bitcoin");
+        assert_eq!(new_asset.unit_value, 10.0);
+
+        insta::assert_json_snapshot!(new_asset);
     }
 
-    if let Some(new_unit_value) = request.unit_value {
-        existing_asset.unit_value = new_unit_value;
+    #[sqlx::test(fixtures("bitcoin_asset"))]
+    async fn test_list_assets(db: sqlx::PgPool) {
+        let Json(assets) = list_assets(db.into()).await.expect("success");
+
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].name, "bitcoin");
+
+        insta::assert_json_snapshot!(assets);
     }
 
-    Ok(Json(existing_asset.clone()))
+    #[sqlx::test(fixtures("bitcoin_asset"))]
+    async fn test_update_asset(db: sqlx::PgPool) {
+        let request = UpdateAssetRequest {
+            id: 1,
+            name: Some("ethereum".to_string()),
+            unit_value: Some(20.0),
+        };
+
+        let Json(updated_asset) = update_asset(Admin, db.into(), Json(request))
+            .await
+            .expect("success");
+
+        assert_eq!(updated_asset.id, 1);
+        assert_eq!(updated_asset.name, "ethereum");
+        assert_eq!(updated_asset.unit_value, 20.0);
+
+        insta::assert_json_snapshot!(updated_asset);
+    }
 }
