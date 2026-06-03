@@ -1,3 +1,4 @@
-// Cada conjunto de rotas vive no seu próprio submódulo. Por enquanto só temos a
-// API REST do admin.
+// Cada conjunto de rotas vive no seu próprio submódulo: a API REST do admin
+// (JSON) e o front-end SSR (HTML).
 pub mod api;
+pub mod frontend;

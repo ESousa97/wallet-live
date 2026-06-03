@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wallet Live — Entrar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-100 antialiased">
+    <main class="w-full max-w-sm px-6">
+        <div class="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-8 shadow-2xl backdrop-blur">
+            <h1 class="mb-1 text-2xl font-semibold tracking-tight">Wallet Live</h1>
+            <p class="mb-6 text-sm text-neutral-400">Entre ou crie sua conta para continuar.</p>
+
+            <form method="post" action="/login" class="space-y-4">
+                <div>
+                    <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">Usuário</label>
+                    <input
+                        id="username"
+                        name="username"
+                        type="text"
+                        required
+                        autocomplete="username"
+                        class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+                    />
+                </div>
+
+                <div>
+                    <label for="password" class="mb-1 block text-sm font-medium text-neutral-300">Senha</label>
+                    <input
+                        id="password"
+                        name="password"
+                        type="password"
+                        required
+                        autocomplete="current-password"
+                        class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+                    />
+                </div>
+
+                <button
+                    type="submit"
+                    class="w-full rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white active:scale-[0.99]"
+                >
+                    Entrar
+                </button>
+            </form>
+        </div>
+    </main>
+</body>
+</html>

@@ -42,6 +42,9 @@ impl App {
 
         let router = Router::new()
             .nest("/api", crate::routes::api::router())
+            // `merge` monta as rotas do front-end na raiz (sem prefixo), ao
+            // contrário do `nest` da API.
+            .merge(crate::routes::frontend::router())
             .with_state(state);
 
         axum::serve(listener, router).await?;

@@ -5,7 +5,7 @@ use axum::http::request::Parts;
 use sqlx::PgPool;
 
 use crate::app::AppState;
-use crate::models::Asset;
+use crate::models::{Asset, UserRecord};
 
 /// Camada que encapsula todo o acesso ao banco (padrão repository). Quem usa o
 /// repository não precisa saber como o banco funciona — só que ele existe. Se o
@@ -64,6 +64,38 @@ impl Repository {
             asset_id,
             name,
             unit_value
+        )
+        .fetch_optional(&self.db)
+        .await
+    }
+
+    /// Insere um novo usuário e devolve o registro recém-criado. Recebe a
+    /// `password_hash` já pronta: a camada de repository não precisa saber como a
+    /// senha é hasheada — confiamos que o módulo de autenticação entregou a hash.
+    /// O `id` é gerado pelo banco (BIGSERIAL) e volta via RETURNING.
+    pub async fn add_user(
+        &self,
+        username: String,
+        password_hash: String,
+    ) -> sqlx::Result<UserRecord> {
+        sqlx::query_as!(
+            UserRecord,
+            "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash",
+            username,
+            password_hash
+        )
+        .fetch_one(&self.db)
+        .await
+    }
+
+    /// Busca um usuário pelo nome (a chave de login). Devolve `Option` porque o
+    /// usuário pode simplesmente não existir — é mais fácil tratar isso do que
+    /// inspecionar o erro `RowNotFound` do SQLx, e modela melhor a realidade.
+    pub async fn get_user_by_name(&self, username: &str) -> sqlx::Result<Option<UserRecord>> {
+        sqlx::query_as!(
+            UserRecord,
+            "SELECT id, username, password_hash FROM users WHERE username = $1",
+            username
         )
         .fetch_optional(&self.db)
         .await

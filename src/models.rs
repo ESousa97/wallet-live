@@ -9,3 +9,14 @@ pub struct Asset {
     pub name: String,
     pub unit_value: f64,
 }
+
+/// Um usuário como ele está no banco de dados — incluindo a `password_hash`.
+/// De propósito NÃO deriva `Serialize`: não queremos formatá-lo como resposta de
+/// nenhum endpoint nem arriscar vazar a hash da senha. É só uma representação
+/// crua da linha da tabela; o usuário "de verdade" (autenticado) é outra struct,
+/// no módulo `auth::user`.
+pub struct UserRecord {
+    pub id: i64,
+    pub username: String,
+    pub password_hash: String,
+}

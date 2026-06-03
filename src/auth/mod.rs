@@ -1,3 +1,4 @@
-// Teremos dois tipos de autenticação: a do admin (aqui) e, mais para frente
-// (Aula 4/5), a do usuário final do sistema.
+// Dois tipos de autenticação: a do admin (secret key no header) e a do usuário
+// final do sistema (nome + senha hasheada no banco).
 pub mod admin;
+pub mod user;

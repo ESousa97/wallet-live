@@ -13,10 +13,18 @@ pub enum AppError {
     InvalidCredentials,
     #[error("asset does not exist")]
     AssetDoesNotExist,
+    #[error("user does not exist")]
+    UserDoesNotExist,
+    #[error("username already taken")]
+    UsernameTaken,
     // `transparent` delega Display/source ao erro interno; `#[from]` gera a
     // conversão automática, então um erro de SQLx vira AppError com `?`.
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+    // Falha ao renderizar um template Askama — provavelmente arquivo ausente ou
+    // mal formatado: erro de configuração nosso, não do cliente.
+    #[error(transparent)]
+    Template(#[from] askama::Error),
 }
 
 /// Formato JSON de um erro devolvido pela API.
@@ -36,8 +44,13 @@ impl IntoResponse for AppError {
             AppError::MissingAuthorization => StatusCode::BAD_REQUEST,
             AppError::InvalidCredentials => StatusCode::UNAUTHORIZED,
             AppError::AssetDoesNotExist => StatusCode::NOT_FOUND,
+            AppError::UserDoesNotExist => StatusCode::NOT_FOUND,
+            // O nome já está em uso: erro do cliente.
+            AppError::UsernameTaken => StatusCode::BAD_REQUEST,
             // Algo inesperado aconteceu no banco: erro interno do servidor.
             AppError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            // Falha ao renderizar template: configuração nossa, erro interno.
+            AppError::Template(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
         (status, Json(error_response)).into_response()
