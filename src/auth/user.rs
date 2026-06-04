@@ -1,7 +1,40 @@
+use std::convert::Infallible;
+
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use axum_extra::extract::cookie::CookieJar;
+use jwt_simple::prelude::*;
 use password_auth::VerifyError;
 
+use crate::app::AppState;
 use crate::error::AppError;
 use crate::repository::Repository;
+
+/// Chave secreta usada para ASSINAR e VALIDAR os JWTs. Só o back-end a conhece:
+/// é o que garante que um token não foi fabricado nem adulterado. Em produção
+/// viria de uma variável de ambiente ou cofre de segredos, como a do admin.
+const SECRET_KEY: &[u8] = b"I'm so secret";
+
+/// Nome do cookie onde o token de sessão é guardado no navegador.
+pub const TOKEN_COOKIE: &str = "token";
+
+/// Dados que embutimos no JWT (as "claims" customizadas). Vira JSON, então
+/// precisa de Serialize/Deserialize. NÃO é criptografado — qualquer um lê o
+/// conteúdo; a assinatura é que prova a autenticidade.
+#[derive(Serialize, Deserialize)]
+struct UserClaims {
+    id: i64,
+    username: String,
+}
+
+impl From<User> for UserClaims {
+    fn from(user: User) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+        }
+    }
+}
 
 /// Um usuário já autenticado no sistema. Diferente do `Admin`, ele carrega dados
 /// (id e nome) que usaremos depois para acessar as relações do usuário. Os campos
@@ -24,6 +57,59 @@ impl User {
 
     pub fn username(&self) -> &str {
         &self.username
+    }
+
+    /// Gera o JWT de sessão deste usuário. Consome `self` (move os dados para
+    /// dentro das claims). O token é assinado com a `SECRET_KEY` e vale 10 min.
+    pub fn auth_token(self) -> Result<String, AppError> {
+        let key = HS256Key::from_bytes(SECRET_KEY);
+        let claims = Claims::with_custom_claims(UserClaims::from(self), Duration::from_mins(10));
+        let token = key.authenticate(claims)?;
+        Ok(token)
+    }
+
+    /// Reconstrói um `User` a partir de um token. Usa a mesma chave para VALIDAR
+    /// a assinatura: se o token foi fabricado/adulterado ou expirou, falha. Só
+    /// depois dessa verificação confiamos no conteúdo das claims.
+    fn from_auth_token(token: &str) -> Result<Self, AppError> {
+        let key = HS256Key::from_bytes(SECRET_KEY);
+        let claims = key.verify_token::<UserClaims>(token, None)?;
+        Ok(Self::new(claims.custom.id, claims.custom.username))
+    }
+}
+
+/// Extrai um `User` autenticado da requisição: lê o cookie `token` (que o
+/// navegador reenvia automaticamente) e o valida. Basta anotar um handler com um
+/// parâmetro `User` para exigir sessão válida.
+impl FromRequestParts<AppState> for User {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // A cookie jar é só uma leitura dos headers da requisição.
+        let jar = CookieJar::from_headers(&parts.headers);
+        let token = jar
+            .get(TOKEN_COOKIE)
+            .ok_or(AppError::MissingAuthorization)?
+            .value();
+
+        Self::from_auth_token(token)
+    }
+}
+
+/// Versão tolerante: nunca falha. Útil em telas que devem redirecionar para o
+/// login quando não há sessão válida, em vez de devolver um erro. Token ausente,
+/// inválido ou expirado viram `None`.
+impl FromRequestParts<AppState> for Option<User> {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(User::from_request_parts(parts, state).await.ok())
     }
 }
 

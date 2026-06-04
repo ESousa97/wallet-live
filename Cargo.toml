@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 askama = { version = "0.16.0", features = ["derive"] }
 axum = { version = "0.8.9", features = ["macros"] }
+axum-extra = { version = "0.10.1", features = ["cookie"] }
 color-eyre = "0.6.5"
+jwt-simple = { version = "0.12.12", default-features = false, features = ["pure-rust"] }
 password-auth = "1.0.0"
 dotenvy = "0.15.7"
 serde = { version = "1.0.228", features = ["derive"] }

@@ -25,6 +25,18 @@ pub enum AppError {
     // mal formatado: erro de configuração nosso, não do cliente.
     #[error(transparent)]
     Template(#[from] askama::Error),
+    // Falha ao gerar/validar um JWT (token fabricado, expirado ou com assinatura
+    // inválida). Guardamos só a mensagem porque `jwt_simple::Error` é um
+    // `anyhow::Error` (não implementa `std::error::Error`, então não dá pra usar
+    // `#[from]`/`transparent`); a conversão fica no `From` manual abaixo.
+    #[error("token error: {0}")]
+    Jwt(String),
+}
+
+impl From<jwt_simple::Error> for AppError {
+    fn from(error: jwt_simple::Error) -> Self {
+        AppError::Jwt(error.to_string())
+    }
 }
 
 /// Formato JSON de um erro devolvido pela API.
@@ -51,6 +63,8 @@ impl IntoResponse for AppError {
             AppError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
             // Falha ao renderizar template: configuração nossa, erro interno.
             AppError::Template(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            // Token ausente/inválido nas rotas que exigem `User` diretamente.
+            AppError::Jwt(_) => StatusCode::UNAUTHORIZED,
         };
 
         (status, Json(error_response)).into_response()
