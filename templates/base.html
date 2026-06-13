@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="carteira de investimentos — acompanhe ativos, registre compras, veja o lucro." />
+    <title>{% block title %}wallet{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171717'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='18' fill='%2334d399' text-anchor='middle'%3Ew%3C/text%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-neutral-950 font-mono text-neutral-100 antialiased selection:bg-neutral-700/60">
+    {% block content %}{% endblock %}
+</body>
+</html>

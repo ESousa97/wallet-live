@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}wallet :: ativos{% endblock %}
+
+{% block content %}
+<main class="mx-auto max-w-4xl px-6 py-10">
+    <header class="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-semibold tracking-tight">wallet</h1>
+            <p class="mt-1 text-sm text-neutral-400">bem-vindo, {{ user.username() }}</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <button
+                type="button"
+                onclick="document.getElementById('modal').showModal()"
+                class="rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
+            >
+                registrar compra
+            </button>
+            <a
+                href="/logout"
+                class="rounded-xl border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-300 transition hover:border-neutral-500 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400"
+            >
+                sair
+            </a>
+        </div>
+    </header>
+
+    {% if owned_assets.is_empty() %}
+    <section class="rounded-2xl border border-dashed border-neutral-800 px-6 py-16 text-center">
+        <p class="text-sm text-neutral-400">nenhum ativo ainda.</p>
+        <p class="mt-1 text-sm text-neutral-500">registre sua primeira compra para começar a acompanhar ganhos e perdas.</p>
+        <button
+            type="button"
+            onclick="document.getElementById('modal').showModal()"
+            class="mt-6 rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
+        >
+            registrar compra
+        </button>
+    </section>
+    {% else %}
+    <section class="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-800 sm:grid-cols-3">
+        <div class="bg-neutral-900/80 px-5 py-4">
+            <p class="text-xs text-neutral-500">valor da carteira</p>
+            <p class="mt-1 text-lg font-semibold tabular-nums">{{ total_value|money }}</p>
+        </div>
+        <div class="bg-neutral-900/80 px-5 py-4">
+            <p class="text-xs text-neutral-500">investido</p>
+            <p class="mt-1 text-lg font-semibold tabular-nums">{{ total_invested|money }}</p>
+        </div>
+        <div class="bg-neutral-900/80 px-5 py-4">
+            <p class="text-xs text-neutral-500">lucro/prejuízo total</p>
+            {% if total_delta >= 0.0 %}
+            <p class="mt-1 text-lg font-semibold tabular-nums text-emerald-400">+{{ total_delta|money }}</p>
+            {% else %}
+            <p class="mt-1 text-lg font-semibold tabular-nums text-rose-400">{{ total_delta|money }}</p>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="space-y-3">
+        {% for asset in owned_assets %}
+        <article class="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 shadow-2xl backdrop-blur">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-base font-semibold">{{ asset.name }}</h2>
+                    <p class="mt-1 text-sm text-neutral-400 tabular-nums">
+                        {{ asset.quantity_owned }} unidades @ {{ asset.unit_value|money }}
+                    </p>
+                </div>
+                <div class="text-right">
+                    {% if asset.value_delta >= 0.0 %}
+                    <p class="text-xl font-semibold tabular-nums text-emerald-400">+{{ asset.value_delta|money }}</p>
+                    {% else %}
+                    <p class="text-xl font-semibold tabular-nums text-rose-400">{{ asset.value_delta|money }}</p>
+                    {% endif %}
+                    <p class="mt-0.5 text-xs text-neutral-500">lucro/prejuízo total</p>
+                </div>
+            </div>
+
+            <details class="group -mx-2 mt-4">
+                <summary class="flex cursor-pointer select-none items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-neutral-400 transition hover:text-neutral-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 [&::-webkit-details-marker]:hidden [&::marker]:content-none">
+                    <span class="inline-block transition-transform group-open:rotate-90">▸</span>
+                    histórico de compras
+                </summary>
+                <table class="mt-2 w-full text-sm tabular-nums">
+                    <thead>
+                        <tr class="text-xs text-neutral-500">
+                            <th scope="col" class="px-2 py-1.5 text-left font-medium">data</th>
+                            <th scope="col" class="px-2 py-1.5 text-right font-medium">quantidade</th>
+                            <th scope="col" class="px-2 py-1.5 text-right font-medium">preço unitário</th>
+                            <th scope="col" class="px-2 py-1.5 text-right font-medium">variação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for purchase in asset.purchase_history.0 %}
+                        <tr class="border-t border-neutral-800/80 text-neutral-300 transition hover:bg-neutral-900">
+                            <td class="px-2 py-2">{{ purchase.bought_at|human_datetime }}</td>
+                            <td class="px-2 py-2 text-right">{{ purchase.quantity }}</td>
+                            <td class="px-2 py-2 text-right">{{ purchase.unit_value|money }}</td>
+                            {% if purchase.value_delta >= 0.0 %}
+                            <td class="px-2 py-2 text-right font-medium text-emerald-400">+{{ purchase.value_delta|money }}</td>
+                            {% else %}
+                            <td class="px-2 py-2 text-right font-medium text-rose-400">{{ purchase.value_delta|money }}</td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </details>
+        </article>
+        {% endfor %}
+    </section>
+    {% endif %}
+</main>
+
+<dialog
+    id="modal"
+    aria-labelledby="modal_title"
+    class="w-80 rounded-2xl border border-neutral-800 bg-neutral-900 p-7 text-neutral-100 shadow-2xl backdrop:bg-black/70 backdrop:backdrop-blur-sm"
+>
+    <form method="post" action="/assets" class="space-y-4">
+        <h2 id="modal_title" class="text-lg font-semibold tracking-tight">registrar compra</h2>
+
+        <div>
+            <label for="asset_id" class="mb-1 block text-sm font-medium text-neutral-300">ativo</label>
+            <select
+                id="asset_id"
+                name="asset_id"
+                required
+                autofocus
+                class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+            >
+                <option value="" disabled selected>selecione um ativo</option>
+                {% for asset in available_assets %}
+                <option value="{{ asset.id }}">{{ asset.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label for="quantity" class="mb-1 block text-sm font-medium text-neutral-300">quantidade</label>
+            <input
+                id="quantity"
+                name="quantity"
+                type="number"
+                inputmode="decimal"
+                step="any"
+                min="0"
+                required
+                class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+            />
+        </div>
+
+        <div>
+            <label for="unit_value" class="mb-1 block text-sm font-medium text-neutral-300">preço unitário pago</label>
+            <input
+                id="unit_value"
+                name="unit_value"
+                type="number"
+                inputmode="decimal"
+                step="any"
+                min="0"
+                required
+                class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+            />
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+            <button
+                formmethod="dialog"
+                formnovalidate
+                class="rounded-xl border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-300 transition hover:border-neutral-500 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400"
+            >
+                cancelar
+            </button>
+            <button
+                type="submit"
+                class="rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
+            >
+                confirmar
+            </button>
+        </div>
+    </form>
+</dialog>
+{% endblock %}

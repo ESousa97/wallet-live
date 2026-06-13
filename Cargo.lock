@@ -653,6 +653,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "powerfmt",
+ "serde_core",
 ]
 
 [[package]]
@@ -2246,6 +2247,7 @@ dependencies = [
  "sha2 0.10.9",
  "smallvec",
  "thiserror",
+ "time",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -2314,6 +2316,7 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx-core",
  "thiserror",
+ "time",
  "tracing",
 ]
 
@@ -2348,6 +2351,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror",
+ "time",
  "tracing",
  "whoami",
 ]
@@ -2372,6 +2376,7 @@ dependencies = [
  "serde",
  "sqlx-core",
  "thiserror",
+ "time",
  "tracing",
  "url",
 ]
@@ -2760,7 +2765,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "wallet-live"
+name = "wallet"
 version = "0.1.0"
 dependencies = [
  "askama",
@@ -2775,6 +2780,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "thiserror",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",

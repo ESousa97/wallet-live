@@ -1,32 +1,32 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wallet Live — Entrar</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-100 antialiased">
-    <main class="w-full max-w-sm px-6">
+{% extends "base.html" %}
+
+{% block title %}wallet :: entrar{% endblock %}
+
+{% block content %}
+<main class="flex min-h-screen items-center justify-center px-6">
+    <div class="w-full max-w-sm">
         <div class="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-8 shadow-2xl backdrop-blur">
-            <h1 class="mb-1 text-2xl font-semibold tracking-tight">Wallet Live</h1>
-            <p class="mb-6 text-sm text-neutral-400">Entre ou crie sua conta para continuar.</p>
+            <h1 class="mb-1 text-2xl font-semibold tracking-tight">wallet</h1>
+            <p class="mb-6 text-sm text-neutral-400">acompanhe seus ativos, registre compras, veja o lucro.</p>
 
             <form method="post" action="/login" class="space-y-4">
                 <div>
-                    <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">Usuário</label>
+                    <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">usuário</label>
                     <input
                         id="username"
                         name="username"
                         type="text"
                         required
+                        autofocus
                         autocomplete="username"
+                        autocapitalize="none"
+                        spellcheck="false"
                         class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
                     />
                 </div>
 
                 <div>
-                    <label for="password" class="mb-1 block text-sm font-medium text-neutral-300">Senha</label>
+                    <label for="password" class="mb-1 block text-sm font-medium text-neutral-300">senha</label>
                     <input
                         id="password"
                         name="password"
@@ -39,12 +39,14 @@
 
                 <button
                     type="submit"
-                    class="w-full rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white active:scale-[0.99]"
+                    class="w-full rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
                 >
-                    Entrar
+                    entrar
                 </button>
             </form>
         </div>
-    </main>
-</body>
-</html>
+
+        <p class="mt-4 text-center text-xs text-neutral-600">usuários novos são cadastrados automaticamente.</p>
+    </div>
+</main>
+{% endblock %}
