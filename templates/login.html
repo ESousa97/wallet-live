@@ -5,11 +5,15 @@
 {% block content %}
 <main class="flex min-h-screen items-center justify-center px-6">
     <div class="w-full max-w-sm">
-        <div class="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-8 shadow-2xl backdrop-blur">
+        <div class="rounded-lg border border-neutral-800 bg-neutral-900/70 p-8 shadow-2xl">
             <h1 class="mb-1 text-2xl font-semibold tracking-tight">wallet</h1>
-            <p class="mb-6 text-sm text-neutral-400">acompanhe seus ativos, registre compras, veja o lucro.</p>
+            {% if is_register %}
+            <p class="mb-6 text-sm text-neutral-400">crie sua conta para simular uma carteira de investimentos.</p>
+            {% else %}
+            <p class="mb-6 text-sm text-neutral-400">entre para acessar saldo, posições e histórico.</p>
+            {% endif %}
 
-            <form method="post" action="/login" class="space-y-4">
+            <form method="post" action="{% if is_register %}/register{% else %}/login{% endif %}" class="space-y-4">
                 <div>
                     <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">usuário</label>
                     <input
@@ -21,7 +25,7 @@
                         autocomplete="username"
                         autocapitalize="none"
                         spellcheck="false"
-                        class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+                        class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
                     />
                 </div>
 
@@ -32,21 +36,25 @@
                         name="password"
                         type="password"
                         required
-                        autocomplete="current-password"
-                        class="w-full rounded-xl border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+                        autocomplete="{% if is_register %}new-password{% else %}current-password{% endif %}"
+                        class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
                     />
                 </div>
 
                 <button
                     type="submit"
-                    class="w-full rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
+                    class="w-full rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
                 >
-                    entrar
+                    {% if is_register %}criar conta{% else %}entrar{% endif %}
                 </button>
             </form>
         </div>
 
-        <p class="mt-4 text-center text-xs text-neutral-600">usuários novos são cadastrados automaticamente.</p>
+        {% if is_register %}
+        <p class="mt-4 text-center text-xs text-neutral-500">já tem conta? <a href="/login" class="text-neutral-300 underline underline-offset-4">entrar</a></p>
+        {% else %}
+        <p class="mt-4 text-center text-xs text-neutral-500">novo por aqui? <a href="/register" class="text-neutral-300 underline underline-offset-4">criar conta</a></p>
+        {% endif %}
     </div>
 </main>
 {% endblock %}

@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -17,6 +17,14 @@ pub enum AppError {
     UserDoesNotExist,
     #[error("username already taken")]
     UsernameTaken,
+    #[error("invalid amount")]
+    InvalidAmount,
+    #[error("insufficient balance")]
+    InsufficientBalance,
+    #[error("insufficient holdings")]
+    InsufficientHoldings,
+    #[error("market quote unavailable")]
+    QuoteUnavailable,
     // `transparent` delega Display/source ao erro interno; `#[from]` gera a
     // conversão automática, então um erro de SQLx vira AppError com `?`.
     #[error(transparent)]
@@ -31,6 +39,8 @@ pub enum AppError {
     // `#[from]`/`transparent`); a conversão fica no `From` manual abaixo.
     #[error("token error: {0}")]
     Jwt(String),
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
 }
 
 impl From<jwt_simple::Error> for AppError {
@@ -59,12 +69,17 @@ impl IntoResponse for AppError {
             AppError::UserDoesNotExist => StatusCode::NOT_FOUND,
             // O nome já está em uso: erro do cliente.
             AppError::UsernameTaken => StatusCode::BAD_REQUEST,
+            AppError::InvalidAmount => StatusCode::BAD_REQUEST,
+            AppError::InsufficientBalance => StatusCode::BAD_REQUEST,
+            AppError::InsufficientHoldings => StatusCode::BAD_REQUEST,
+            AppError::QuoteUnavailable => StatusCode::BAD_GATEWAY,
             // Algo inesperado aconteceu no banco: erro interno do servidor.
             AppError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
             // Falha ao renderizar template: configuração nossa, erro interno.
             AppError::Template(_) => StatusCode::INTERNAL_SERVER_ERROR,
             // Token ausente/inválido nas rotas que exigem `User` diretamente.
             AppError::Jwt(_) => StatusCode::UNAUTHORIZED,
+            AppError::Http(_) => StatusCode::BAD_GATEWAY,
         };
 
         (status, Json(error_response)).into_response()

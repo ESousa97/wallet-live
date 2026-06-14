@@ -1,24 +1,19 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use sqlx::PgPool;
-
-use sqlx::types::Json;
+use rust_decimal::Decimal;
+use sqlx::{PgPool, Postgres, Transaction as SqlxTransaction};
 
 use crate::app::AppState;
-use crate::models::{Asset, OwnedAsset, OwnedAssetRecord, PurchaseRecord, UserRecord};
+use crate::error::AppError;
+use crate::models::{Asset, Holding, Transaction, UserRecord, WalletSummary};
 
-/// Camada que encapsula todo o acesso ao banco (padrão repository). Quem usa o
-/// repository não precisa saber como o banco funciona — só que ele existe. Se o
-/// formato dos dados ou as queries mudarem, basta alterar aqui.
 pub struct Repository {
     db: PgPool,
 }
 
-/// O repository também é injetado pelos extratores do Axum, então os endpoints
-/// não precisam pegar o `db` do estado manualmente. Nunca falha desde que o
-/// estado esteja inicializado, daí o `Infallible`.
 impl FromRequestParts<AppState> for Repository {
     type Rejection = Infallible;
 
@@ -34,14 +29,12 @@ impl FromRequestParts<AppState> for Repository {
 
 impl Repository {
     pub async fn list_assets(&self) -> sqlx::Result<Vec<Asset>> {
-        sqlx::query_as!(Asset, "SELECT id, name, unit_value FROM assets")
+        sqlx::query_as!(Asset, "SELECT id, name, unit_value FROM assets ORDER BY id")
             .fetch_all(&self.db)
             .await
     }
 
-    pub async fn create_asset(&self, name: String, unit_value: f64) -> sqlx::Result<Asset> {
-        // O id é criado pelo próprio banco (BIGSERIAL); pedimos o registro de
-        // volta com RETURNING para reconstruir o Asset.
+    pub async fn create_asset(&self, name: String, unit_value: Decimal) -> sqlx::Result<Asset> {
         sqlx::query_as!(
             Asset,
             "INSERT INTO assets (name, unit_value) VALUES ($1, $2) RETURNING id, name, unit_value",
@@ -56,10 +49,8 @@ impl Repository {
         &self,
         asset_id: i64,
         name: Option<String>,
-        unit_value: Option<f64>,
+        unit_value: Option<Decimal>,
     ) -> sqlx::Result<Option<Asset>> {
-        // COALESCE mantém o valor atual quando o parâmetro vem nulo (None).
-        // fetch_optional devolve None quando o id não existe.
         sqlx::query_as!(
             Asset,
             "UPDATE assets SET name = COALESCE($2, name), unit_value = COALESCE($3, unit_value) WHERE id = $1 RETURNING id, name, unit_value",
@@ -71,10 +62,25 @@ impl Repository {
         .await
     }
 
-    /// Insere um novo usuário e devolve o registro recém-criado. Recebe a
-    /// `password_hash` já pronta: a camada de repository não precisa saber como a
-    /// senha é hasheada — confiamos que o módulo de autenticação entregou a hash.
-    /// O `id` é gerado pelo banco (BIGSERIAL) e volta via RETURNING.
+    pub async fn update_known_asset_prices(
+        &self,
+        updates: &HashMap<&str, Decimal>,
+    ) -> Result<usize, AppError> {
+        let assets = self.list_assets().await?;
+        let mut updated = 0;
+
+        for asset in assets {
+            let key = asset.name.trim().to_lowercase();
+
+            if let Some(unit_value) = updates.get(key.as_str()) {
+                self.update_asset(asset.id, None, Some(*unit_value)).await?;
+                updated += 1;
+            }
+        }
+
+        Ok(updated)
+    }
+
     pub async fn add_user(
         &self,
         username: String,
@@ -82,7 +88,7 @@ impl Repository {
     ) -> sqlx::Result<UserRecord> {
         sqlx::query_as!(
             UserRecord,
-            "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash",
+            "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash, balance",
             username,
             password_hash
         )
@@ -90,78 +96,54 @@ impl Repository {
         .await
     }
 
-    /// Busca um usuário pelo nome (a chave de login). Devolve `Option` porque o
-    /// usuário pode simplesmente não existir — é mais fácil tratar isso do que
-    /// inspecionar o erro `RowNotFound` do SQLx, e modela melhor a realidade.
     pub async fn get_user_by_name(&self, username: &str) -> sqlx::Result<Option<UserRecord>> {
         sqlx::query_as!(
             UserRecord,
-            "SELECT id, username, password_hash FROM users WHERE username = $1",
+            "SELECT id, username, password_hash, balance FROM users WHERE username = $1",
             username
         )
         .fetch_optional(&self.db)
         .await
     }
 
-    /// Registra a compra de `quantity` unidades do ativo `asset_id` pelo usuário
-    /// `user_id`, ao preço unitário `unit_value`. `id` e `bought_at` são
-    /// preenchidos pelo banco (BIGSERIAL e `DEFAULT NOW()`) e voltam via RETURNING.
-    pub async fn add_owned_asset(
-        &self,
-        user_id: i64,
-        asset_id: i64,
-        quantity: f64,
-        unit_value: f64,
-    ) -> sqlx::Result<OwnedAssetRecord> {
+    pub async fn wallet_summary(&self, user_id: i64) -> sqlx::Result<WalletSummary> {
         sqlx::query_as!(
-            OwnedAssetRecord,
-            "INSERT INTO owned_assets (user_id, asset_id, quantity, unit_value) \
-             VALUES ($1, $2, $3, $4) \
-             RETURNING id, user_id, asset_id, quantity, unit_value, bought_at",
-            user_id,
-            asset_id,
-            quantity,
-            unit_value
+            WalletSummary,
+            r#"
+            SELECT
+                u.balance,
+                COALESCE(SUM(h.quantity * a.unit_value), 0) AS "holdings_value!",
+                u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0) AS "total_value!",
+                COALESCE(SUM(h.quantity * h.avg_cost), 0) AS "total_invested!",
+                COALESCE(SUM(h.quantity * (a.unit_value - h.avg_cost)), 0) AS "total_delta!"
+            FROM users u
+            LEFT JOIN holdings h ON h.user_id = u.id
+            LEFT JOIN assets a ON a.id = h.asset_id
+            WHERE u.id = $1
+            GROUP BY u.id, u.balance
+            "#,
+            user_id
         )
         .fetch_one(&self.db)
         .await
     }
 
-    /// Para cada ativo que `user_id` já comprou alguma vez, devolve um resumo:
-    /// valor atual, quanto foi investido vs. quanto vale hoje (`value_delta`),
-    /// quanto o usuário possui no total (`quantity_owned`) e o histórico de
-    /// compras (mais recente primeiro).
-    ///
-    /// Junta `assets` com `owned_assets` (uma linha por compra) e agrupa por
-    /// ativo. `value_delta!`/`quantity_owned!` são `SUM`s sobre um grupo que tem
-    /// pelo menos uma linha (INNER JOIN), então nunca são `NULL` — mas a
-    /// assinatura do Postgres para `SUM` diz que poderiam ser, daí o `!` para o
-    /// SQLx confiar que não são. `purchase_history!` é montado com
-    /// `json_agg`/`json_build_object`; o `: Json<Vec<PurchaseRecord>>` indica ao
-    /// SQLx que essa coluna é um JSON a ser desserializado nesse tipo.
-    pub async fn list_owned_assets(&self, user_id: i64) -> sqlx::Result<Vec<OwnedAsset>> {
+    pub async fn list_holdings(&self, user_id: i64) -> sqlx::Result<Vec<Holding>> {
         sqlx::query_as!(
-            OwnedAsset,
+            Holding,
             r#"
             SELECT
                 a.id,
                 a.name,
                 a.unit_value,
-                SUM((a.unit_value - oa.unit_value) * oa.quantity) AS "value_delta!",
-                SUM(oa.quantity) AS "quantity_owned!",
-                JSON_AGG(
-                    JSON_BUILD_OBJECT(
-                        'bought_at', oa.bought_at,
-                        'unit_value', oa.unit_value,
-                        'quantity', oa.quantity,
-                        'value_delta', (a.unit_value - oa.unit_value) * oa.quantity
-                    )
-                    ORDER BY oa.bought_at DESC
-                ) AS "purchase_history!: Json<Vec<PurchaseRecord>>"
-            FROM assets a
-            JOIN owned_assets oa ON oa.asset_id = a.id
-            WHERE oa.user_id = $1
-            GROUP BY a.id, a.name, a.unit_value
+                h.quantity AS "quantity_owned!",
+                h.avg_cost,
+                h.quantity * a.unit_value AS "current_value!",
+                h.quantity * h.avg_cost AS "invested_value!",
+                h.quantity * (a.unit_value - h.avg_cost) AS "value_delta!"
+            FROM holdings h
+            JOIN assets a ON a.id = h.asset_id
+            WHERE h.user_id = $1
             ORDER BY a.id
             "#,
             user_id
@@ -169,10 +151,208 @@ impl Repository {
         .fetch_all(&self.db)
         .await
     }
+
+    pub async fn list_transactions(&self, user_id: i64) -> sqlx::Result<Vec<Transaction>> {
+        sqlx::query_as!(
+            Transaction,
+            r#"
+            SELECT
+                t.id,
+                t.kind,
+                a.name AS "asset_name?",
+                t.quantity,
+                t.unit_value,
+                t.cash_delta,
+                t.created_at
+            FROM transactions t
+            LEFT JOIN assets a ON a.id = t.asset_id
+            WHERE t.user_id = $1
+            ORDER BY t.created_at DESC, t.id DESC
+            LIMIT 25
+            "#,
+            user_id
+        )
+        .fetch_all(&self.db)
+        .await
+    }
+
+    pub async fn deposit(&self, user_id: i64, amount: Decimal) -> Result<(), AppError> {
+        if amount <= Decimal::ZERO {
+            return Err(AppError::InvalidAmount);
+        }
+
+        let mut tx = self.db.begin().await?;
+
+        sqlx::query!(
+            "UPDATE users SET balance = balance + $2 WHERE id = $1",
+            user_id,
+            amount
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            "INSERT INTO transactions (user_id, kind, cash_delta) VALUES ($1, 'deposit', $2)",
+            user_id,
+            amount
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn buy_asset(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError> {
+        if quantity <= Decimal::ZERO {
+            return Err(AppError::InvalidAmount);
+        }
+
+        let mut tx = self.db.begin().await?;
+        let asset = asset_for_update(&mut tx, asset_id).await?;
+        let cost = asset.unit_value * quantity;
+
+        let user = sqlx::query!(
+            "SELECT balance FROM users WHERE id = $1 FOR UPDATE",
+            user_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if user.balance < cost {
+            return Err(AppError::InsufficientBalance);
+        }
+
+        sqlx::query!(
+            "UPDATE users SET balance = balance - $2 WHERE id = $1",
+            user_id,
+            cost
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO holdings (user_id, asset_id, quantity, avg_cost)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, asset_id) DO UPDATE SET
+                avg_cost = ((holdings.quantity * holdings.avg_cost) + (EXCLUDED.quantity * EXCLUDED.avg_cost))
+                    / (holdings.quantity + EXCLUDED.quantity),
+                quantity = holdings.quantity + EXCLUDED.quantity
+            "#,
+            user_id,
+            asset_id,
+            quantity,
+            asset.unit_value
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            "INSERT INTO transactions (user_id, kind, asset_id, quantity, unit_value, cash_delta) VALUES ($1, 'buy', $2, $3, $4, $5)",
+            user_id,
+            asset_id,
+            quantity,
+            asset.unit_value,
+            -cost
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn sell_asset(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError> {
+        if quantity <= Decimal::ZERO {
+            return Err(AppError::InvalidAmount);
+        }
+
+        let mut tx = self.db.begin().await?;
+        let asset = asset_for_update(&mut tx, asset_id).await?;
+
+        let holding = sqlx::query!(
+            "SELECT quantity FROM holdings WHERE user_id = $1 AND asset_id = $2 FOR UPDATE",
+            user_id,
+            asset_id
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::InsufficientHoldings)?;
+
+        if holding.quantity < quantity {
+            return Err(AppError::InsufficientHoldings);
+        }
+
+        let proceeds = asset.unit_value * quantity;
+
+        sqlx::query!(
+            "UPDATE users SET balance = balance + $2 WHERE id = $1",
+            user_id,
+            proceeds
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if holding.quantity == quantity {
+            sqlx::query!(
+                "DELETE FROM holdings WHERE user_id = $1 AND asset_id = $2",
+                user_id,
+                asset_id
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query!(
+                "UPDATE holdings SET quantity = quantity - $3 WHERE user_id = $1 AND asset_id = $2",
+                user_id,
+                asset_id,
+                quantity
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query!(
+            "INSERT INTO transactions (user_id, kind, asset_id, quantity, unit_value, cash_delta) VALUES ($1, 'sell', $2, $3, $4, $5)",
+            user_id,
+            asset_id,
+            quantity,
+            asset.unit_value,
+            proceeds
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
-/// Só nos testes: permite converter uma `PgPool` direto num `Repository` sem
-/// precisar expor o campo `db` (que deve continuar privado à camada repository).
+async fn asset_for_update(
+    tx: &mut SqlxTransaction<'_, Postgres>,
+    asset_id: i64,
+) -> Result<Asset, AppError> {
+    sqlx::query_as!(
+        Asset,
+        "SELECT id, name, unit_value FROM assets WHERE id = $1 FOR UPDATE",
+        asset_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AppError::AssetDoesNotExist)
+}
+
 #[cfg(test)]
 impl From<PgPool> for Repository {
     fn from(db: PgPool) -> Self {

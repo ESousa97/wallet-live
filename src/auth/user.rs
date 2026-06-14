@@ -13,7 +13,7 @@ use crate::repository::Repository;
 /// Chave secreta usada para ASSINAR e VALIDAR os JWTs. Só o back-end a conhece:
 /// é o que garante que um token não foi fabricado nem adulterado. Em produção
 /// viria de uma variável de ambiente ou cofre de segredos, como a do admin.
-const SECRET_KEY: &[u8] = b"I'm so secret";
+const JWT_SECRET_ENV: &str = "JWT_SECRET";
 
 /// Nome do cookie onde o token de sessão é guardado no navegador.
 pub const TOKEN_COOKIE: &str = "token";
@@ -62,7 +62,8 @@ impl User {
     /// Gera o JWT de sessão deste usuário. Consome `self` (move os dados para
     /// dentro das claims). O token é assinado com a `SECRET_KEY` e vale 10 min.
     pub fn auth_token(self) -> Result<String, AppError> {
-        let key = HS256Key::from_bytes(SECRET_KEY);
+        let secret = std::env::var(JWT_SECRET_ENV).map_err(|_| AppError::InvalidCredentials)?;
+        let key = HS256Key::from_bytes(secret.as_bytes());
         let claims = Claims::with_custom_claims(UserClaims::from(self), Duration::from_mins(10));
         let token = key.authenticate(claims)?;
         Ok(token)
@@ -72,7 +73,8 @@ impl User {
     /// a assinatura: se o token foi fabricado/adulterado ou expirou, falha. Só
     /// depois dessa verificação confiamos no conteúdo das claims.
     fn from_auth_token(token: &str) -> Result<Self, AppError> {
-        let key = HS256Key::from_bytes(SECRET_KEY);
+        let secret = std::env::var(JWT_SECRET_ENV).map_err(|_| AppError::InvalidCredentials)?;
+        let key = HS256Key::from_bytes(secret.as_bytes());
         let claims = key.verify_token::<UserClaims>(token, None)?;
         Ok(Self::new(claims.custom.id, claims.custom.username))
     }

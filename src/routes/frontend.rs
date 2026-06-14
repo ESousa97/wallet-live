@@ -1,87 +1,89 @@
 use askama::Template;
+use axum::Router;
 use axum::extract::Form;
 use axum::response::{Html, Redirect};
 use axum::routing::get;
-use axum::Router;
-use axum_extra::extract::cookie::{Cookie, CookieJar};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::instrument;
 
 use crate::app::AppState;
-use crate::auth::user::{UnauthenticatedUser, User, TOKEN_COOKIE};
+use crate::auth::user::{TOKEN_COOKIE, UnauthenticatedUser, User};
 use crate::error::AppError;
-use crate::models::{Asset, OwnedAsset};
+use crate::models::{Asset, Holding, Transaction, WalletSummary};
+use crate::quotes::sync_market_quotes;
 use crate::repository::Repository;
 
-/// Rotas do front-end (SSR). Diferente da API, devolvem HTML em vez de JSON.
-/// Usam o mesmo `AppState`, de onde sai o `Repository`.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(index))
         .route("/login", get(login_page).post(login))
+        .route("/register", get(register_page).post(register))
         .route("/logout", get(logout))
-        .route("/assets", get(assets_page).post(purchase_asset))
+        .route("/assets", get(assets_page))
+        .route("/deposit", get(deposit_page).post(deposit))
+        .route("/buy", get(buy_page).post(buy_asset))
+        .route("/sell", get(sell_page).post(sell_asset))
+        .route("/quotes/sync", get(assets_page).post(sync_quotes))
 }
 
-/// Template da tela de login. Não carrega dado nenhum — o Askama lê o arquivo de
-/// `templates/login.html` e checa o template em tempo de compilação.
 #[derive(Template)]
 #[template(path = "login.html")]
-struct LoginPage;
-
-/// Serve o formulário de login (GET). `Html` só ajusta o content-type da resposta.
-#[instrument(skip_all)]
-async fn login_page() -> Result<Html<String>, AppError> {
-    let html = LoginPage.render()?;
-    Ok(Html(html))
+struct LoginPage {
+    is_register: bool,
 }
 
-/// Campos do formulário — têm que bater com os `name` dos inputs no HTML.
+#[instrument(skip_all)]
+async fn login_page() -> Result<Html<String>, AppError> {
+    Ok(Html(LoginPage { is_register: false }.render()?))
+}
+
+#[instrument(skip_all)]
+async fn register_page() -> Result<Html<String>, AppError> {
+    Ok(Html(LoginPage { is_register: true }.render()?))
+}
+
 #[derive(Deserialize)]
 struct LoginForm {
     username: String,
     password: String,
 }
 
-/// Processa o envio do formulário (POST). Para simplificar, a mesma tela faz
-/// login E cadastro: se o usuário existe, autentica; se não, registra. Em vez de
-/// devolver HTML, agora grava o JWT num cookie e redireciona para o index — assim
-/// a sessão sobrevive a um F5.
 #[instrument(skip_all)]
 async fn login(
     repository: Repository,
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
-    let unauth_user = UnauthenticatedUser::new(form.username, form.password);
+    let user = UnauthenticatedUser::new(form.username, form.password)
+        .authenticate(&repository)
+        .await?;
 
-    let user = match unauth_user.authenticate(&repository).await {
-        Ok(user) => user,
-        // Usuário inexistente é o gatilho para cadastrá-lo agora.
-        Err(AppError::UserDoesNotExist) => unauth_user.register(&repository).await?,
-        // Qualquer outro erro (senha errada, banco) sobe normalmente.
-        Err(error) => return Err(error),
-    };
-
-    // O token assinado vai num cookie `http_only` (inacessível ao JS do
-    // navegador). Devolver a `jar` na resposta emite o header Set-Cookie.
-    let token = user.auth_token()?;
-    let cookie = Cookie::build((TOKEN_COOKIE, token)).http_only(true).build();
-
-    Ok((jar.add(cookie), Redirect::to("/")))
+    Ok((jar.add(session_cookie(user)?), Redirect::to("/")))
 }
 
-/// Encerra a sessão: remove o cookie `token` e volta para o login. Não precisa
-/// validar nada antes — remover um cookie que não existe não é um erro.
+#[instrument(skip_all)]
+async fn register(
+    repository: Repository,
+    jar: CookieJar,
+    Form(form): Form<LoginForm>,
+) -> Result<(CookieJar, Redirect), AppError> {
+    let user = UnauthenticatedUser::new(form.username, form.password)
+        .register(&repository)
+        .await?;
+
+    Ok((jar.add(session_cookie(user)?), Redirect::to("/")))
+}
+
 #[instrument(skip_all)]
 async fn logout(jar: CookieJar) -> (CookieJar, Redirect) {
-    (jar.remove(TOKEN_COOKIE), Redirect::to("/login"))
+    (
+        jar.remove(Cookie::build(TOKEN_COOKIE).path("/").build()),
+        Redirect::to("/login"),
+    )
 }
 
-/// Agora o index é só um roteador: usa `Option<User>` para decidir para onde
-/// mandar o visitante, sem nunca devolver conteúdo próprio. Com sessão válida vai
-/// para `/assets`; sem ela, para `/login`. A própria `/assets` não repete essa
-/// checagem — ela já exige `User`.
 #[instrument(skip_all)]
 async fn index(maybe_user: Option<User>) -> Redirect {
     match maybe_user {
@@ -90,88 +92,138 @@ async fn index(maybe_user: Option<User>) -> Redirect {
     }
 }
 
-/// Template da tela de ativos: o que o usuário possui (com lucro/prejuízo e
-/// histórico de compras) e os ativos disponíveis no sistema, usados para
-/// popular o formulário de compra.
 #[derive(Template)]
 #[template(path = "assets.html")]
 struct AssetsPage {
-    owned_assets: Vec<OwnedAsset>,
+    holdings: Vec<Holding>,
     available_assets: Vec<Asset>,
+    transactions: Vec<Transaction>,
+    summary: WalletSummary,
     user: User,
-    // Resumo do portfólio, agregado sobre todas as posições. Calculado no
-    // handler: template não é lugar de regra de negócio.
-    total_value: f64,
-    total_invested: f64,
-    total_delta: f64,
+    action: WalletAction,
 }
 
-/// Tela principal: ativos que o usuário possui (com quanto ele tem hoje,
-/// lucro/prejuízo total e histórico de compras) e os ativos disponíveis no
-/// sistema. As duas consultas não dependem uma da outra, então `try_join!` as
-/// executa concorrentemente em vez de aguardar uma depois da outra.
+enum WalletAction {
+    None,
+    Deposit,
+    Buy,
+    Sell,
+}
+
 #[instrument(skip_all)]
 async fn assets_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
-    let (owned_assets, available_assets) = tokio::try_join!(
-        repository.list_owned_assets(user.id()),
-        repository.list_assets()
-    )?;
-
-    // Valor atual do portfólio (preço atual × quantidade, somado por posição) e
-    // lucro/prejuízo total. O investido sai por diferença: atual - delta.
-    let total_value: f64 = owned_assets
-        .iter()
-        .map(|asset| asset.unit_value * asset.quantity_owned)
-        .sum();
-    let total_delta: f64 = owned_assets.iter().map(|asset| asset.value_delta).sum();
-    let total_invested = total_value - total_delta;
-
-    let html = AssetsPage {
-        owned_assets,
-        available_assets,
-        user,
-        total_value,
-        total_invested,
-        total_delta,
-    }
-    .render()?;
-
-    Ok(Html(html))
+    render_wallet(user, repository, WalletAction::None).await
 }
 
-/// Campos do formulário de compra — têm que bater com os `name` dos inputs no
-/// HTML (o `<select>` de ativos manda o `id`, não o nome).
-#[derive(Deserialize)]
-struct PurchaseAssetForm {
-    asset_id: i64,
-    quantity: f64,
-    unit_value: f64,
-}
-
-/// Registra a compra de um ativo. O usuário vem do cookie (JWT), nunca do
-/// formulário — assim ninguém pode submeter uma compra em nome de outra pessoa.
 #[instrument(skip_all)]
-async fn purchase_asset(
+async fn deposit_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
+    render_wallet(user, repository, WalletAction::Deposit).await
+}
+
+#[instrument(skip_all)]
+async fn buy_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
+    render_wallet(user, repository, WalletAction::Buy).await
+}
+
+#[instrument(skip_all)]
+async fn sell_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
+    render_wallet(user, repository, WalletAction::Sell).await
+}
+
+async fn render_wallet(
     user: User,
     repository: Repository,
-    Form(form): Form<PurchaseAssetForm>,
-) -> Result<Redirect, AppError> {
-    repository
-        .add_owned_asset(user.id(), form.asset_id, form.quantity, form.unit_value)
-        .await?;
+    action: WalletAction,
+) -> Result<Html<String>, AppError> {
+    let (summary, holdings, available_assets, transactions) = tokio::try_join!(
+        repository.wallet_summary(user.id()),
+        repository.list_holdings(user.id()),
+        repository.list_assets(),
+        repository.list_transactions(user.id())
+    )?;
 
+    Ok(Html(
+        AssetsPage {
+            holdings,
+            available_assets,
+            transactions,
+            summary,
+            user,
+            action,
+        }
+        .render()?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct AmountForm {
+    amount: Decimal,
+}
+
+#[instrument(skip_all)]
+async fn deposit(
+    user: User,
+    repository: Repository,
+    Form(form): Form<AmountForm>,
+) -> Result<Redirect, AppError> {
+    repository.deposit(user.id(), form.amount).await?;
     Ok(Redirect::to("/assets"))
 }
 
-/// Filtros customizados usados pelo template `assets.html`. O Askama procura um
-/// módulo `filters` no mesmo arquivo onde o template (`AssetsPage`) é definido.
+#[derive(Deserialize)]
+struct TradeAssetForm {
+    asset_id: i64,
+    quantity: Decimal,
+}
+
+#[instrument(skip_all)]
+async fn buy_asset(
+    user: User,
+    repository: Repository,
+    Form(form): Form<TradeAssetForm>,
+) -> Result<Redirect, AppError> {
+    repository
+        .buy_asset(user.id(), form.asset_id, form.quantity)
+        .await?;
+    Ok(Redirect::to("/assets"))
+}
+
+#[instrument(skip_all)]
+async fn sell_asset(
+    user: User,
+    repository: Repository,
+    Form(form): Form<TradeAssetForm>,
+) -> Result<Redirect, AppError> {
+    repository
+        .sell_asset(user.id(), form.asset_id, form.quantity)
+        .await?;
+    Ok(Redirect::to("/assets"))
+}
+
+#[instrument(skip_all)]
+async fn sync_quotes(_user: User, repository: Repository) -> Result<Redirect, AppError> {
+    sync_market_quotes(&repository).await?;
+    Ok(Redirect::to("/assets"))
+}
+
+fn session_cookie(user: User) -> Result<Cookie<'static>, AppError> {
+    let secure = std::env::var("COOKIE_SECURE")
+        .map(|value| value == "true")
+        .unwrap_or(false);
+
+    Ok(Cookie::build((TOKEN_COOKIE, user.auth_token()?))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .secure(secure)
+        .path("/")
+        .build())
+}
+
 pub mod filters {
     use askama::Values;
+    use rust_decimal::Decimal;
     use time::OffsetDateTime;
 
-    /// Formata um timestamp como `AAAA-MM-DD HH:MM`. O erro só pode acontecer se
-    /// a descrição do formato em si estiver malformada — nunca por causa de
-    /// `value`, que sempre vem de uma data válida do banco.
     #[askama::filter_fn]
     pub fn human_datetime(value: &OffsetDateTime, _: &dyn Values) -> askama::Result<String> {
         let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]")
@@ -180,11 +232,43 @@ pub mod filters {
         value.format(&format).map_err(askama::Error::custom)
     }
 
-    /// Formata um valor monetário com duas casas decimais fixas. Os modelos usam
-    /// `f64` (escolha didática do curso), e o Display padrão exporia o ruído de
-    /// arredondamento de float na tela — `-9.999999999999998` em vez de `-10.00`.
     #[askama::filter_fn]
-    pub fn money(value: &f64, _: &dyn Values) -> askama::Result<String> {
-        Ok(format!("{value:.2}"))
+    pub fn money(value: &Decimal, _: &dyn Values) -> askama::Result<String> {
+        let raw = format!("{:.2}", value.abs());
+        let (integer, cents) = raw
+            .split_once('.')
+            .ok_or_else(|| askama::Error::custom("invalid decimal format"))?;
+
+        let mut grouped = String::new();
+        for (index, character) in integer.chars().rev().enumerate() {
+            if index > 0 && index % 3 == 0 {
+                grouped.push('.');
+            }
+            grouped.push(character);
+        }
+        let integer = grouped.chars().rev().collect::<String>();
+        let sign = if value.is_sign_negative() { "- " } else { "" };
+
+        Ok(format!("{sign}R$ {integer},{cents}"))
+    }
+
+    #[askama::filter_fn]
+    pub fn quantity(value: &Decimal, _: &dyn Values) -> askama::Result<String> {
+        Ok(value.normalize().to_string())
+    }
+
+    #[askama::filter_fn]
+    pub fn nonnegative(value: &Decimal, _: &dyn Values) -> askama::Result<bool> {
+        Ok(*value >= Decimal::ZERO)
+    }
+
+    #[askama::filter_fn]
+    pub fn transaction_kind(value: &str, _: &dyn Values) -> askama::Result<&'static str> {
+        Ok(match value {
+            "deposit" => "deposito",
+            "buy" => "compra",
+            "sell" => "venda",
+            _ => "movimentacao",
+        })
     }
 }
