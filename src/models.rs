@@ -1,5 +1,5 @@
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use time::OffsetDateTime;
 
 #[derive(Clone, Serialize)]
@@ -32,16 +32,6 @@ pub struct Holding {
     pub avg_cost: Decimal,
     pub current_value: Decimal,
     pub invested_value: Decimal,
-    pub value_delta: Decimal,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct PurchaseRecord {
-    #[serde(with = "time::serde::rfc3339")]
-    pub bought_at: OffsetDateTime,
-    pub unit_value: Decimal,
-    pub quantity: Decimal,
     pub value_delta: Decimal,
 }
 

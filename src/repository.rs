@@ -62,23 +62,36 @@ impl Repository {
         .await
     }
 
+    /// Aplica novos preços a ativos identificados pelo nome (normalizado para
+    /// minúsculas, sem espaços nas pontas). Faz tudo em **uma** ida ao banco:
+    /// `UNNEST` transforma os dois arrays (nomes e valores) numa tabela virtual e
+    /// o `UPDATE ... FROM` casa pelo nome. Antes era um `SELECT` seguido de um
+    /// `UPDATE` por ativo (N+1) — agora é um statement só.
     pub async fn update_known_asset_prices(
         &self,
         updates: &HashMap<&str, Decimal>,
     ) -> Result<usize, AppError> {
-        let assets = self.list_assets().await?;
-        let mut updated = 0;
+        // `unzip` garante que `names[i]` corresponde a `values[i]` (iterar
+        // `keys()` e `values()` em separado não daria essa garantia).
+        let (names, values): (Vec<String>, Vec<Decimal>) = updates
+            .iter()
+            .map(|(name, value)| (name.to_string(), *value))
+            .unzip();
 
-        for asset in assets {
-            let key = asset.name.trim().to_lowercase();
+        let result = sqlx::query!(
+            r#"
+            UPDATE assets AS a
+            SET unit_value = u.value
+            FROM UNNEST($1::text[], $2::numeric[]) AS u(name, value)
+            WHERE LOWER(TRIM(a.name)) = u.name
+            "#,
+            &names,
+            &values
+        )
+        .execute(&self.db)
+        .await?;
 
-            if let Some(unit_value) = updates.get(key.as_str()) {
-                self.update_asset(asset.id, None, Some(*unit_value)).await?;
-                updated += 1;
-            }
-        }
-
-        Ok(updated)
+        Ok(result.rows_affected() as usize)
     }
 
     pub async fn add_user(
@@ -357,5 +370,205 @@ async fn asset_for_update(
 impl From<PgPool> for Repository {
     fn from(db: PgPool) -> Self {
         Self { db }
+    }
+}
+
+// Testes do núcleo financeiro: depósito, compra, venda, custo médio e as guardas
+// de saldo/posição. É a parte do sistema que mexe em dinheiro — a que mais merece
+// rede de proteção. Cada `#[sqlx::test]` roda num banco efêmero próprio (migrações
+// aplicadas automaticamente), então os testes são isolados e podem rodar em
+// paralelo.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    async fn new_user(repo: &Repository, name: &str) -> i64 {
+        repo.add_user(name.to_string(), "stub-hash".to_string())
+            .await
+            .expect("create user")
+            .id
+    }
+
+    async fn new_asset(repo: &Repository, name: &str, price: Decimal) -> i64 {
+        repo.create_asset(name.to_string(), price)
+            .await
+            .expect("create asset")
+            .id
+    }
+
+    #[sqlx::test]
+    async fn deposit_credits_balance_and_logs_transaction(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        repo.deposit(uid, dec!(100)).await.expect("deposit");
+
+        let summary = repo.wallet_summary(uid).await.expect("summary");
+        assert_eq!(summary.balance, dec!(100));
+
+        let txs = repo.list_transactions(uid).await.expect("transactions");
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].kind, "deposit");
+        assert_eq!(txs[0].cash_delta, dec!(100));
+    }
+
+    #[sqlx::test]
+    async fn deposit_rejects_non_positive_amounts(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        assert!(matches!(
+            repo.deposit(uid, dec!(0)).await,
+            Err(AppError::InvalidAmount)
+        ));
+        assert!(matches!(
+            repo.deposit(uid, dec!(-5)).await,
+            Err(AppError::InvalidAmount)
+        ));
+
+        assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(0));
+    }
+
+    #[sqlx::test]
+    async fn buy_debits_balance_and_opens_holding(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+
+        repo.buy_asset(uid, aid, dec!(3)).await.expect("buy");
+
+        let summary = repo.wallet_summary(uid).await.unwrap();
+        assert_eq!(summary.balance, dec!(70));
+        assert_eq!(summary.holdings_value, dec!(30));
+
+        let holdings = repo.list_holdings(uid).await.unwrap();
+        assert_eq!(holdings.len(), 1);
+        assert_eq!(holdings[0].quantity_owned, dec!(3));
+        assert_eq!(holdings[0].avg_cost, dec!(10));
+    }
+
+    #[sqlx::test]
+    async fn buy_rejects_when_balance_is_insufficient(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(10)).await.unwrap();
+
+        // Custo 20 (2 @ 10) maior que o saldo 10.
+        let result = repo.buy_asset(uid, aid, dec!(2)).await;
+        assert!(matches!(result, Err(AppError::InsufficientBalance)));
+
+        // A transação inteira foi revertida: saldo intacto, nenhuma posição.
+        assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(10));
+        assert!(repo.list_holdings(uid).await.unwrap().is_empty());
+    }
+
+    #[sqlx::test]
+    async fn buy_rejects_unknown_asset(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+
+        let result = repo.buy_asset(uid, 999, dec!(1)).await;
+        assert!(matches!(result, Err(AppError::AssetDoesNotExist)));
+    }
+
+    #[sqlx::test]
+    async fn buying_more_averages_the_cost_basis(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(1000)).await.unwrap();
+
+        repo.buy_asset(uid, aid, dec!(2)).await.unwrap(); // 2 @ 10
+        repo.update_asset(aid, None, Some(dec!(20))).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(2)).await.unwrap(); // 2 @ 20
+
+        let holdings = repo.list_holdings(uid).await.unwrap();
+        assert_eq!(holdings[0].quantity_owned, dec!(4));
+        // (2*10 + 2*20) / 4 = 15
+        assert_eq!(holdings[0].avg_cost, dec!(15));
+    }
+
+    #[sqlx::test]
+    async fn selling_everything_closes_the_position(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(3)).await.unwrap(); // saldo 70, 3 un
+
+        repo.sell_asset(uid, aid, dec!(3)).await.expect("sell");
+
+        assert!(repo.list_holdings(uid).await.unwrap().is_empty());
+        // 70 + 3 * 10 de volta.
+        assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(100));
+    }
+
+    #[sqlx::test]
+    async fn partial_sell_keeps_remaining_units(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(4)).await.unwrap(); // saldo 60
+
+        repo.sell_asset(uid, aid, dec!(1)).await.unwrap(); // +10 -> 70
+
+        let holdings = repo.list_holdings(uid).await.unwrap();
+        assert_eq!(holdings[0].quantity_owned, dec!(3));
+        // Vender não altera o custo médio das unidades restantes.
+        assert_eq!(holdings[0].avg_cost, dec!(10));
+        assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(70));
+    }
+
+    #[sqlx::test]
+    async fn sell_rejects_more_than_owned(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(1)).await.unwrap();
+
+        // Mais do que a posição comporta.
+        assert!(matches!(
+            repo.sell_asset(uid, aid, dec!(2)).await,
+            Err(AppError::InsufficientHoldings)
+        ));
+
+        // Vender um ativo sem nenhuma posição também é rejeitado.
+        let other = new_asset(&repo, "ethereum", dec!(5)).await;
+        assert!(matches!(
+            repo.sell_asset(uid, other, dec!(1)).await,
+            Err(AppError::InsufficientHoldings)
+        ));
+    }
+
+    #[sqlx::test]
+    async fn update_known_asset_prices_matches_by_normalized_name(db: PgPool) {
+        let repo = Repository::from(db);
+        // "Bitcoin" com maiúscula deve casar com a chave "bitcoin" (normalização).
+        let btc = new_asset(&repo, "Bitcoin", dec!(1)).await;
+        let real = new_asset(&repo, "real", dec!(1)).await;
+        let eth = new_asset(&repo, "ethereum", dec!(7)).await;
+
+        let mut updates = HashMap::new();
+        updates.insert("bitcoin", dec!(500000));
+        updates.insert("real", dec!(1));
+        updates.insert("dolar", dec!(5)); // sem ativo correspondente: ignorado
+
+        let count = repo
+            .update_known_asset_prices(&updates)
+            .await
+            .expect("update prices");
+        assert_eq!(count, 2);
+
+        let assets = repo.list_assets().await.unwrap();
+        let price_of = |id: i64| assets.iter().find(|a| a.id == id).unwrap().unit_value;
+        assert_eq!(price_of(btc), dec!(500000));
+        assert_eq!(price_of(real), dec!(1));
+        assert_eq!(price_of(eth), dec!(7)); // intocado
     }
 }

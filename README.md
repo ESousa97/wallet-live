@@ -3,11 +3,13 @@
 Carteira digital de investimentos construída **inteiramente em Rust** — backend
 e frontend. Projeto do curso *RESTful Stack* (DIO), com o instrutor Breno Lemos.
 
-> Status: **Final — Telas do usuário** ✅
-> Carteira completa: além da API do admin e da sessão stateless via JWT, o
-> usuário agora tem uma **tela de ativos** (`/assets`) que mostra o que ele
-> possui, **lucro/prejuízo** por ativo e o **histórico de compras**, com um
-> formulário (em `<dialog>`) para **registrar novas compras** — e **logout**.
+> Status: **Final — Carteira completa** ✅
+> Além da API do admin e da sessão stateless via JWT, o usuário tem uma **tela de
+> ativos** (`/assets`) com **saldo em caixa**, **posições** (quantidade, preço,
+> custo médio e lucro/prejuízo por ativo), **resumo do patrimônio** e o
+> **histórico de transações**. As operações são **depositar**, **comprar**,
+> **vender** e **atualizar cotações** (preços de mercado reais via API da
+> Coinbase) — tudo com valores monetários exatos (`rust_decimal`) — e **logout**.
 
 ## Estrutura
 
@@ -17,23 +19,25 @@ curso: textos em inglês minúsculo e fonte monoespaçada.
 ```
 src/
   main.rs            # enxuta: tokio::main -> App::start()
-  app.rs             # App (inicialização) + AppState { db: PgPool }; monta os routers
-  models.rs          # Asset, UserRecord, OwnedAssetRecord, PurchaseRecord, OwnedAsset
-  error.rs           # AppError + IntoResponse (status HTTP) + conversões de erro
-  repository.rs      # Repository: encapsula todo o acesso ao banco (queries)
+  app.rs             # App (boot, /health, shutdown gracioso) + AppState { db, config }
+  config.rs          # Config: lê e valida os segredos do ambiente UMA vez (fail-fast)
+  models.rs          # Asset, UserRecord, WalletSummary, Holding, Transaction
+  error.rs           # AppError + IntoResponse (status HTTP, log de 5xx) + conversões
+  quotes.rs          # cotações de mercado (Coinbase) -> atualiza preços dos ativos
+  repository.rs      # Repository: todo o acesso ao banco (queries) + testes do core
   auth/
     admin.rs         # extrator Admin (autenticação por secret key, p/ a API)
     user.rs          # User/UnauthenticatedUser, hash de senha, JWT e extratores
   routes/
     api.rs           # API REST do admin (JSON) + testes (#[sqlx::test] + insta)
-    frontend.rs      # front-end SSR (HTML): login/logout, index, ativos e compras
+    frontend.rs      # front-end SSR (HTML): login/logout, carteira, operações, filtros
     fixtures/        # dados SQL para testes (bitcoin_asset.sql)
     snapshots/       # snapshots aceitos do insta (.snap)
 templates/
   base.html          # esqueleto comum (head, Tailwind, fonte mono); as páginas o estendem
   login.html         # tela de login ({% extends "base.html" %})
-  assets.html        # tela de ativos: ganhos/perdas, histórico e compra ({% extends "base.html" %})
-migrations/          # create_assets + create_users + create_owned_assets ({up,down}.sql)
+  assets.html        # carteira: saldo, posições, resumo, transações e operações
+migrations/          # assets + users + holdings/transactions + ajustes ({up,down}.sql)
 docker-compose.yaml
 .env / .env.example
 ```
@@ -92,72 +96,59 @@ O servidor Axum serve **duas coisas** ao mesmo tempo:
   vez de devolver um erro feio.
 
 > ⚠️ **Didático, não pronto para produção.** Toda a autenticação foi feita "na
-> mão" para desmistificar como JWT e cookies funcionam. A `SECRET_KEY` está no
-> código (em produção viria de variável de ambiente/cofre de segredos), não há
-> *refresh token*, e os erros internos não são censurados na resposta. Em um
-> projeto real, prefira uma solução de autenticação consolidada.
+> mão" para desmistificar como JWT e cookies funcionam. Os segredos vêm do
+> ambiente (ver `config.rs`), mas não há *refresh token* nem rotação de chave, e
+> o JWT expira em 10 min sem renovação. Em um projeto real, prefira uma solução
+> de autenticação consolidada.
 
-### Ativos do usuário, lucro/prejuízo e histórico de compras (Final)
+### Carteira: saldo, posições e transações (Final)
 
-- **Tabela `owned_assets`** — o histórico de compras: cada linha é "o usuário
-  `user_id` comprou `quantity` unidades do ativo `asset_id` por `unit_value`
-  cada, em `bought_at`" (FK para `users` e `assets`; `id`/`bought_at` gerados
-  pelo banco via `BIGSERIAL`/`DEFAULT NOW()`).
-- **Agregação no banco, não no Rust** — `list_owned_assets` faz `JOIN` entre
-  `assets` e `owned_assets`, agrupando por ativo com `GROUP BY`. Para cada
-  ativo o Postgres calcula a soma da quantidade possuída (`quantity_owned`), o
-  lucro/prejuízo total (`value_delta`, = `(valor atual - valor pago) *
-  quantidade`, somado por compra) e monta o **histórico de compras como JSON**
-  com `JSON_AGG`/`JSON_BUILD_OBJECT` (ordenado da compra mais recente para a
-  mais antiga).
-- **`sqlx::types::Json<Vec<PurchaseRecord>>`** — o SQLx decodifica a coluna
-  JSON agregada direto numa `Vec<PurchaseRecord>`. As colunas de `SUM`/JSON
-  usam o sufixo `!` (`AS "value_delta!"`, `AS "purchase_history!:
-  Json<Vec<PurchaseRecord>>"`) para o SQLx confiar que não são `NULL` — o
-  `JOIN` garante pelo menos uma linha por grupo.
-- **`OwnedAsset` vs. `PurchaseRecord`** — `OwnedAsset` é o resumo por ativo
-  (o que aparece no card); `PurchaseRecord` é uma compra dentro do histórico
-  (`bought_at`, `unit_value`, `quantity`, `value_delta` daquela compra
-  específica). `PurchaseRecord::bought_at` usa `time::serde::rfc3339`, porque
-  o Postgres serializa `timestamptz` em JSON nesse formato.
-- **Tela `/assets`** — concorrente via `tokio::try_join!`: busca os ativos que
-  o usuário possui (`list_owned_assets`) e os ativos disponíveis no sistema
-  (`list_assets`, para popular o formulário) ao mesmo tempo, já que uma query
-  não depende da outra.
-- **Resumo do portfólio** — acima dos cards, uma barra com **valor atual**,
-  **investido** e **lucro/prejuízo total**, agregados sobre todas as posições.
-  Os três totais são calculados no `assets_page` (não no template): `value` é
-  `Σ preço_atual × quantidade`, `delta` é `Σ value_delta`, e `invested = value
-  − delta`. A barra só aparece quando há ativos.
-- **Lucro/prejuízo colorido** — no template, `value_delta >= 0.0` decide entre
-  verde (`text-emerald-400`, com prefixo `+`) e vermelho (`text-rose-400`), no
-  total do portfólio, no total por ativo e em cada linha do histórico.
+- **Dinheiro exato com `rust_decimal`** — saldo, preços, quantidades e custo
+  médio são `Decimal` (mapeado em `NUMERIC` no Postgres). Nada de `f64`: não há
+  ruído de arredondamento de ponto flutuante em valores monetários.
+- **`holdings` + `transactions`, não um log de compras** — em vez de derivar
+  tudo de um histórico append-only, o esquema separa duas preocupações:
+  - **`holdings`** — a **posição atual** por `(user, asset)`: `quantity` possuída
+    e `avg_cost` (custo médio ponderado). Mutada atomicamente em cada compra/venda.
+  - **`transactions`** — o **livro-razão imutável** de tudo o que aconteceu
+    (`deposit`, `buy`, `sell`), usado para a tela de histórico e auditoria.
+  Manter a posição materializada deixa as leituras triviais (sem agregação
+  pesada) e torna a lógica de mover dinheiro um `UPDATE` transacional explícito.
+- **Operações transacionais** (`repository.rs`):
+  - `deposit` — credita o saldo e registra a transação.
+  - `buy_asset` — trava o ativo e o usuário (`FOR UPDATE`), confere saldo, debita,
+    abre/atualiza a posição recalculando o **custo médio ponderado** via
+    `ON CONFLICT ... DO UPDATE`, e registra a transação. Tudo numa transação:
+    saldo insuficiente reverte sem deixar rastro.
+  - `sell_asset` — confere a posição, credita o saldo ao preço atual, reduz a
+    quantidade (ou apaga a posição se zerar) e registra a transação.
+  Cada uma é coberta por testes `#[sqlx::test]` (ver "Testes").
+- **Resumo do patrimônio no banco** — `wallet_summary` calcula numa query só:
+  saldo em caixa, valor das posições (`Σ quantidade × preço`), patrimônio total,
+  total investido (`Σ quantidade × custo_médio`) e resultado dos ativos
+  (`Σ quantidade × (preço − custo_médio)`).
+- **Cotações de mercado reais** (`quotes.rs`) — "atualizar cotações" busca
+  `USD→BRL` e `BTC→BRL` na API pública da Coinbase (concorrente via
+  `tokio::try_join!`) e aplica os preços aos ativos cujo nome casa (bitcoin, btc,
+  dólar, real…) em **um único `UPDATE` com `UNNEST`** (sem N+1).
+- **Tela `/assets`** — busca resumo, posições, ativos disponíveis e transações
+  em paralelo (`tokio::try_join!`), já que nenhuma query depende das outras. As
+  operações (depositar/comprar/vender) abrem um formulário inline na própria tela.
+- **Lucro/prejuízo colorido** — o filtro `nonnegative` decide entre verde
+  (`text-emerald-400`, com prefixo `+`) e vermelho (`text-rose-400`), no resumo,
+  por posição e nas transações.
 - **Filtros Askama customizados** (`#[askama::filter_fn]`, módulo `filters` em
-  `frontend.rs`):
-  - `human_datetime` formata `OffsetDateTime` como `AAAA-MM-DD HH:MM`;
-  - `money` formata `f64` com **duas casas fixas** (`{:.2}`). É o que esconde o
-    ruído de arredondamento de float que o professor mencionou na demo
-    (`-9.999999999998` vira `-10.00`); valores monetários usam ainda
-    `tabular-nums` para alinhar as colunas numéricas.
-- **Estado vazio** — usuário sem nenhuma compra vê um *empty state* dedicado
-  (com um CTA "register purchase") em vez de uma página em branco.
-- **Acessibilidade e detalhes** — `focus-visible` em todos os botões/links,
-  `scope="col"` nos cabeçalhos da tabela, `aria-labelledby` no `<dialog>`,
-  `autofocus`/`autocomplete`/`inputmode="decimal"` nos formulários, e um
-  favicon SVG inline + `color-scheme: dark` no `base.html`.
-- **Quase zero JavaScript** — o histórico de compras é um `<details>`/
-  `<summary>` (expande sem JS); o `<dialog>` de compra abre com um único
-  `onclick="…showModal()"` e o botão **cancel** fecha via `formmethod="dialog"`
-  (recurso nativo do form-in-dialog) — sem `close()` manual. Não há nenhum
-  `<script>` próprio na página.
-- **Herança de templates** — `base.html` concentra o esqueleto comum (head,
-  Tailwind, fonte mono e tema escuro); `login.html` e `assets.html` só
-  preenchem os blocos `title` e `content` com `{% extends "base.html" %}` —
-  o mecanismo de *extends* do Askama, igual ao do Jinja2/Django templates.
-- **Logout** — `GET /logout` remove o cookie `token` (`CookieJar::remove`) e
-  redireciona para `/login`.
-- **Index = roteador puro** — `/` não renderiza mais nada: com sessão válida
-  redireciona para `/assets`; sem ela, para `/login`.
+  `frontend.rs`): `human_datetime` (`AAAA-MM-DD HH:MM`), `money` (formata
+  `Decimal` como `R$ 1.234,56`, com separador de milhar e duas casas),
+  `quantity` (normaliza o `Decimal`, sem zeros à toa), `nonnegative` e
+  `transaction_kind` (rótulo em pt-BR para `deposit`/`buy`/`sell`).
+- **Estado vazio e acessibilidade** — *empty states* dedicados, `focus-visible`,
+  `scope="col"`, `inputmode="decimal"`/`autocomplete` nos formulários, favicon
+  SVG inline e `color-scheme: dark` no `base.html`.
+- **Herança de templates** — `base.html` concentra o esqueleto comum; `login.html`
+  e `assets.html` preenchem `title`/`content` com `{% extends "base.html" %}`.
+- **Logout** — `GET /logout` remove o cookie `token` e redireciona para `/login`.
+- **Index = roteador puro** — `/` com sessão vai para `/assets`; sem ela, `/login`.
 
 ## Rotas
 
@@ -165,12 +156,16 @@ O servidor Axum serve **duas coisas** ao mesmo tempo:
 
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
-| `GET` | `/login` | — | Formulário de login/cadastro |
-| `POST` | `/login` | — | Autentica **ou** cadastra; grava o cookie `token` e redireciona para `/` |
+| `GET` | `/health` | — | Sonda de saúde (200 se o serviço e o banco respondem) |
+| `GET` | `/login` · `/register` | — | Formulário de login / cadastro |
+| `POST` | `/login` · `/register` | — | Autentica ou cadastra; grava o cookie `token` e vai para `/` |
 | `GET` | `/logout` | — | Remove o cookie `token` e redireciona para `/login` |
 | `GET` | `/` | opcional | Roteador: com sessão vai para `/assets`, sem ela para `/login` |
-| `GET` | `/assets` | sessão | Ativos possuídos (lucro/prejuízo + histórico) e formulário de compra |
-| `POST` | `/assets` | sessão | Registra uma compra (`asset_id`, `quantity`, `unit_value`) e redireciona para `/assets` |
+| `GET` | `/assets` | sessão | Carteira: saldo, posições, resumo e transações |
+| `POST` | `/deposit` | sessão | Deposita saldo (`amount`) |
+| `POST` | `/buy` | sessão | Compra um ativo (`asset_id`, `quantity`) ao preço atual |
+| `POST` | `/sell` | sessão | Vende um ativo (`asset_id`, `quantity`) ao preço atual |
+| `POST` | `/quotes/sync` | sessão | Atualiza os preços com cotações de mercado |
 
 ### API do admin (JSON, sob `/api`)
 
@@ -197,12 +192,10 @@ docker compose up -d
 # 2) configurar a conexão (copie o exemplo, ajuste se precisar)
 Copy-Item .env.example .env
 
-# 3) criar as tabelas (três migrações). Com a CLI do SQLx:
-#    cargo install sqlx-cli; cargo sqlx migrate run
-#    Sem a CLI, aplicando o SQL direto:
-psql "postgres://postgres:postgres@localhost:5432/postgres" -f migrations/20260602000000_create_assets.up.sql
-psql "postgres://postgres:postgres@localhost:5432/postgres" -f migrations/20260603000000_create_users.up.sql
-psql "postgres://postgres:postgres@localhost:5432/postgres" -f migrations/20260604000000_create_owned_assets.up.sql
+# 3) criar as tabelas (todas as migrações de migrations/). Com a CLI do SQLx:
+cargo install sqlx-cli --no-default-features --features postgres,rustls
+cargo sqlx migrate run
+#    Sem a CLI, aplique os arquivos *.up.sql de migrations/ em ordem com psql.
 
 # 4) rodar (o Postgres precisa estar no ar — o SQLx checa as queries ao compilar)
 cargo run
@@ -266,12 +259,38 @@ Os testes usam `#[sqlx::test]` (precisa do Postgres no ar) e **insta** para os
 snapshots. Para revisar/atualizar snapshots: `cargo install cargo-insta` e
 `cargo insta review` — ou rode os testes uma vez com `$env:INSTA_UPDATE='always'`.
 
+Cobertura: além dos snapshots da API do admin, o **núcleo financeiro** tem
+testes dedicados em `repository.rs` (depósito, compra, venda, custo médio
+ponderado, e as guardas de saldo/posição insuficientes), cada um num banco
+efêmero isolado.
+
+## Refinamentos de engenharia
+
+Sobre a base do curso, alguns ajustes de gente grande:
+
+- **Configuração centralizada e *fail-fast*** (`config.rs`) — os segredos são
+  lidos e validados **uma vez** no boot. Falta um segredo? O serviço não sobe, com
+  mensagem clara — em vez de devolver um `401` confuso na primeira requisição.
+- **Sem releitura de ambiente por requisição** — `JWT_SECRET`, `ADMIN_SECRET_KEY`
+  e `COOKIE_SECURE` ficam na `AppState`; validar token/credencial não toca mais o
+  ambiente a cada chamada.
+- **Erros 5xx não vazam detalhes** — falhas internas são logadas no servidor com a
+  causa raiz e respondidas ao cliente com uma mensagem genérica (nada de texto de
+  erro do SQL na resposta).
+- **Startup robusto** — `.env` ausente não é fatal (produção usa o ambiente real),
+  `RUST_LOG` controla o nível de log (`EnvFilter`), desligamento gracioso no
+  Ctrl+C e endereço de escuta configurável (`BIND_ADDR`).
+- **Sonda `/health`** — confirma serviço + banco para health checks de
+  orquestradores.
+- **Sem N+1** — a sincronização de cotações virou um único `UPDATE ... UNNEST`.
+
 ## Teste funcional
 
 A sequência completa em funcionamento: subir o Postgres (`docker compose up`),
-aplicar a migração, rodar o servidor (`cargo run`) e exercer a API com
+aplicar as migrações, rodar o servidor (`cargo run`) e exercer a API com
 `Invoke-RestMethod` (GET/POST/PATCH), além da suíte de testes passando
-(`cargo test` → 3 passed).
+(`cargo test` → 13 passed). _(A captura abaixo é de uma execução anterior, com a
+suíte ainda menor.)_
 
 ![Teste funcional: docker compose up, migração, cargo run com logs do servidor e queries, requisições à API via Invoke-RestMethod e cargo test com 3 testes passando](assets/2026-06-02_23-18.png)
 
@@ -306,7 +325,9 @@ argon2), **jwt-simple** (JWT), **dotenvy** (.env), **tracing** +
   hash argon2), tela de login/cadastro renderizada no servidor.
 - **Aula 5 — Autenticação stateless com JWT** ✅: sessão via JWT assinado em
   cookie HttpOnly; index que redireciona ao login quando não há sessão válida.
-- **Final — Telas do usuário** ✅: tabela `owned_assets`, agregação no banco
-  (`JOIN` + `GROUP BY` + `JSON_AGG`/`JSON_BUILD_OBJECT`) para lucro/prejuízo e
-  histórico de compras por ativo, tela `/assets` (ativos possuídos + formulário
-  de compra num `<dialog>`), filtro Askama `human_datetime` e `/logout`.
+- **Final — Carteira completa** ✅: dinheiro exato com `rust_decimal`, esquema
+  `holdings` + `transactions`, operações transacionais (depositar/comprar/vender)
+  com custo médio ponderado, resumo do patrimônio e cotações de mercado reais
+  (Coinbase). Acrescido de refinamentos de engenharia: configuração *fail-fast*,
+  sonda `/health`, desligamento gracioso, censura de erros 5xx na resposta e
+  testes do núcleo financeiro (ver "Refinamentos de engenharia").

@@ -1,6 +1,6 @@
 use askama::Template;
 use axum::Router;
-use axum::extract::Form;
+use axum::extract::{Form, State};
 use axum::response::{Html, Redirect};
 use axum::routing::get;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -10,6 +10,7 @@ use tracing::instrument;
 
 use crate::app::AppState;
 use crate::auth::user::{TOKEN_COOKIE, UnauthenticatedUser, User};
+use crate::config::Config;
 use crate::error::AppError;
 use crate::models::{Asset, Holding, Transaction, WalletSummary};
 use crate::quotes::sync_market_quotes;
@@ -52,6 +53,7 @@ struct LoginForm {
 
 #[instrument(skip_all)]
 async fn login(
+    State(state): State<AppState>,
     repository: Repository,
     jar: CookieJar,
     Form(form): Form<LoginForm>,
@@ -60,11 +62,15 @@ async fn login(
         .authenticate(&repository)
         .await?;
 
-    Ok((jar.add(session_cookie(user)?), Redirect::to("/")))
+    Ok((
+        jar.add(session_cookie(&user, &state.config)?),
+        Redirect::to("/"),
+    ))
 }
 
 #[instrument(skip_all)]
 async fn register(
+    State(state): State<AppState>,
     repository: Repository,
     jar: CookieJar,
     Form(form): Form<LoginForm>,
@@ -73,7 +79,10 @@ async fn register(
         .register(&repository)
         .await?;
 
-    Ok((jar.add(session_cookie(user)?), Redirect::to("/")))
+    Ok((
+        jar.add(session_cookie(&user, &state.config)?),
+        Redirect::to("/"),
+    ))
 }
 
 #[instrument(skip_all)]
@@ -206,17 +215,15 @@ async fn sync_quotes(_user: User, repository: Repository) -> Result<Redirect, Ap
     Ok(Redirect::to("/assets"))
 }
 
-fn session_cookie(user: User) -> Result<Cookie<'static>, AppError> {
-    let secure = std::env::var("COOKIE_SECURE")
-        .map(|value| value == "true")
-        .unwrap_or(false);
-
-    Ok(Cookie::build((TOKEN_COOKIE, user.auth_token()?))
-        .http_only(true)
-        .same_site(SameSite::Strict)
-        .secure(secure)
-        .path("/")
-        .build())
+fn session_cookie(user: &User, config: &Config) -> Result<Cookie<'static>, AppError> {
+    Ok(
+        Cookie::build((TOKEN_COOKIE, user.auth_token(&config.jwt_secret)?))
+            .http_only(true)
+            .same_site(SameSite::Strict)
+            .secure(config.cookie_secure)
+            .path("/")
+            .build(),
+    )
 }
 
 pub mod filters {

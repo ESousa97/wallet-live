@@ -1,5 +1,6 @@
 mod app;
 pub mod auth;
+mod config;
 mod error;
 pub mod models;
 mod quotes;

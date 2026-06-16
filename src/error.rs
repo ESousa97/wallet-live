@@ -57,12 +57,9 @@ struct ErrorResponse {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let error_response = ErrorResponse {
-            error: self.to_string(),
-        };
-
         // Cada erro vira um status HTTP apropriado, em vez de devolver 200.
-        let status = match self {
+        // Casamos por referência para ainda poder usar `self` no log/mensagem.
+        let status = match &self {
             AppError::MissingAuthorization => StatusCode::BAD_REQUEST,
             AppError::InvalidCredentials => StatusCode::UNAUTHORIZED,
             AppError::AssetDoesNotExist => StatusCode::NOT_FOUND,
@@ -82,6 +79,17 @@ impl IntoResponse for AppError {
             AppError::Http(_) => StatusCode::BAD_GATEWAY,
         };
 
-        (status, Json(error_response)).into_response()
+        // Falhas 5xx são problema NOSSO: registramos o erro completo no servidor
+        // (com a causa raiz) e devolvemos uma mensagem genérica ao cliente. Assim
+        // não vazamos detalhes internos — texto de erro do SQL, nomes de colunas,
+        // string de conexão — na resposta HTTP.
+        let error = if status.is_server_error() {
+            tracing::error!(error = ?self, "internal error serving request");
+            "internal server error".to_string()
+        } else {
+            self.to_string()
+        };
+
+        (status, Json(ErrorResponse { error })).into_response()
     }
 }

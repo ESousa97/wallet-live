@@ -10,13 +10,11 @@ use crate::app::AppState;
 use crate::error::AppError;
 use crate::repository::Repository;
 
-/// Chave secreta usada para ASSINAR e VALIDAR os JWTs. Só o back-end a conhece:
-/// é o que garante que um token não foi fabricado nem adulterado. Em produção
-/// viria de uma variável de ambiente ou cofre de segredos, como a do admin.
-const JWT_SECRET_ENV: &str = "JWT_SECRET";
-
 /// Nome do cookie onde o token de sessão é guardado no navegador.
 pub const TOKEN_COOKIE: &str = "token";
+
+/// Por quanto tempo o JWT de sessão é válido (em minutos).
+const SESSION_MINUTES: u64 = 10;
 
 /// Dados que embutimos no JWT (as "claims" customizadas). Vira JSON, então
 /// precisa de Serialize/Deserialize. NÃO é criptografado — qualquer um lê o
@@ -25,15 +23,6 @@ pub const TOKEN_COOKIE: &str = "token";
 struct UserClaims {
     id: i64,
     username: String,
-}
-
-impl From<User> for UserClaims {
-    fn from(user: User) -> Self {
-        Self {
-            id: user.id,
-            username: user.username,
-        }
-    }
 }
 
 /// Um usuário já autenticado no sistema. Diferente do `Admin`, ele carrega dados
@@ -59,12 +48,18 @@ impl User {
         &self.username
     }
 
-    /// Gera o JWT de sessão deste usuário. Consome `self` (move os dados para
-    /// dentro das claims). O token é assinado com a `SECRET_KEY` e vale 10 min.
-    pub fn auth_token(self) -> Result<String, AppError> {
-        let secret = std::env::var(JWT_SECRET_ENV).map_err(|_| AppError::InvalidCredentials)?;
+    /// Gera o JWT de sessão deste usuário, assinado com `secret`. O token vale
+    /// `SESSION_MINUTES` minutos. A chave vem da `Config` (ver `config.rs`), não
+    /// mais do ambiente relido a cada chamada.
+    pub fn auth_token(&self, secret: &str) -> Result<String, AppError> {
         let key = HS256Key::from_bytes(secret.as_bytes());
-        let claims = Claims::with_custom_claims(UserClaims::from(self), Duration::from_mins(10));
+        let claims = Claims::with_custom_claims(
+            UserClaims {
+                id: self.id,
+                username: self.username.clone(),
+            },
+            Duration::from_mins(SESSION_MINUTES),
+        );
         let token = key.authenticate(claims)?;
         Ok(token)
     }
@@ -72,8 +67,7 @@ impl User {
     /// Reconstrói um `User` a partir de um token. Usa a mesma chave para VALIDAR
     /// a assinatura: se o token foi fabricado/adulterado ou expirou, falha. Só
     /// depois dessa verificação confiamos no conteúdo das claims.
-    fn from_auth_token(token: &str) -> Result<Self, AppError> {
-        let secret = std::env::var(JWT_SECRET_ENV).map_err(|_| AppError::InvalidCredentials)?;
+    fn from_auth_token(token: &str, secret: &str) -> Result<Self, AppError> {
         let key = HS256Key::from_bytes(secret.as_bytes());
         let claims = key.verify_token::<UserClaims>(token, None)?;
         Ok(Self::new(claims.custom.id, claims.custom.username))
@@ -88,7 +82,7 @@ impl FromRequestParts<AppState> for User {
 
     async fn from_request_parts(
         parts: &mut Parts,
-        _state: &AppState,
+        state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         // A cookie jar é só uma leitura dos headers da requisição.
         let jar = CookieJar::from_headers(&parts.headers);
@@ -97,7 +91,7 @@ impl FromRequestParts<AppState> for User {
             .ok_or(AppError::MissingAuthorization)?
             .value();
 
-        Self::from_auth_token(token)
+        Self::from_auth_token(token, &state.config.jwt_secret)
     }
 }
 
