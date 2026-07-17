@@ -1,0 +1,84 @@
+# CI do wallet. Três frentes independentes:
+#
+#   * lint  — formatação e clippy (warnings = erro), sem banco: o cache .sqlx
+#             versionado (SQLX_OFFLINE) permite compilar as queries offline.
+#   * test  — suíte completa contra um Postgres real em service container
+#             (`#[sqlx::test]` cria bancos efêmeros por teste) e valida que o
+#             cache .sqlx não descolou do schema (`sqlx prepare --check`).
+#   * audit — dependências com vulnerabilidades conhecidas (RustSec).
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy (warnings são erro)
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Segredos de teste — o boot valida presença, não valor.
+      ADMIN_SECRET_KEY: ci-admin-secret
+      JWT_SECRET: ci-jwt-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: instala sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,rustls --locked
+      - name: aplica as migrações
+        run: cargo sqlx migrate run
+      - name: cache .sqlx em dia com o schema
+        run: cargo sqlx prepare --check
+      - name: testes
+        run: cargo test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: instala cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: auditoria de dependências (RustSec)
+        run: cargo audit
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build da imagem de produção
+        run: docker build .
