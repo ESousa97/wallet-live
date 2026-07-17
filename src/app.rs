@@ -31,6 +31,15 @@ pub struct AppState {
 impl AppState {
     pub async fn build(config: Arc<Config>) -> color_eyre::Result<Self> {
         let db = PgPool::connect(&config.database_url).await?;
+
+        // Migrações embutidas no binário (`migrate!` lê `migrations/` em tempo
+        // de compilação) e aplicadas no boot: o serviço nunca sobe com um schema
+        // defasado, e o deploy dispensa um passo manual de migração. É
+        // idempotente — migrações já aplicadas são puladas — e falha o boot se
+        // uma migração falhar, que é o comportamento certo: melhor não subir do
+        // que subir contra um schema pela metade.
+        sqlx::migrate!().run(&db).await?;
+
         Ok(Self {
             db,
             config,
@@ -65,7 +74,13 @@ impl App {
         info!(%bind_addr, "starting service");
 
         let router = Router::new()
-            .route("/health", get(health))
+            // Sondas separadas: liveness (o processo responde?) nunca depende do
+            // banco — reiniciar o app não conserta um banco fora do ar; já a
+            // readiness (pode receber tráfego?) exige o banco são. /health fica
+            // como alias histórico da readiness.
+            .route("/healthz", get(liveness))
+            .route("/readyz", get(readiness))
+            .route("/health", get(readiness))
             // Caminho canônico e versionado da API: mudanças incompatíveis
             // futuras entram como /api/v2 sem quebrar consumidores do v1.
             .nest("/api/v1", crate::routes::api::router())
@@ -151,9 +166,17 @@ async fn security_headers(State(state): State<AppState>, request: Request, next:
     response
 }
 
-/// Sonda de saúde: confirma que o serviço está de pé E que o banco responde.
-/// Útil para health checks de orquestradores (Docker, Kubernetes, load balancer).
-async fn health(State(state): State<AppState>) -> StatusCode {
+/// Liveness: o processo está vivo e atendendo. Se isto falhar, o orquestrador
+/// deve REINICIAR o container — por isso não consulta o banco: reiniciar o app
+/// não ressuscita um Postgres fora do ar.
+async fn liveness() -> StatusCode {
+    StatusCode::OK
+}
+
+/// Readiness: o serviço pode receber tráfego — exige o banco respondendo. Se
+/// falhar, o orquestrador tira a instância do balanceador (sem reiniciá-la) até
+/// a dependência voltar.
+async fn readiness(State(state): State<AppState>) -> StatusCode {
     match sqlx::query("SELECT 1").execute(&state.db).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
