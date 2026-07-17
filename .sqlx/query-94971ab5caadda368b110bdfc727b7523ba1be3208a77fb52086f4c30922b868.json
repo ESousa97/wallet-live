@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO transactions (user_id, kind, asset_id, quantity, unit_value, cash_delta) VALUES ($1, 'buy', $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Numeric",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94971ab5caadda368b110bdfc727b7523ba1be3208a77fb52086f4c30922b868"
+}

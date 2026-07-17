@@ -157,9 +157,7 @@ async fn request_tracing(request: Request, next: Next) -> Response {
         .filter(|value| {
             !value.is_empty()
                 && value.len() <= 64
-                && value
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+                && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         })
         .map(str::to_owned)
         .unwrap_or_else(new_request_id);

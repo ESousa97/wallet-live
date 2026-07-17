@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                u.balance,\n                COALESCE(SUM(h.quantity * a.unit_value), 0) AS \"holdings_value!\",\n                u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0) AS \"total_value!\",\n                COALESCE(SUM(h.quantity * h.avg_cost), 0) AS \"total_invested!\",\n                COALESCE(SUM(h.quantity * (a.unit_value - h.avg_cost)), 0) AS \"total_delta!\"\n            FROM users u\n            LEFT JOIN holdings h ON h.user_id = u.id\n            LEFT JOIN assets a ON a.id = h.asset_id\n            WHERE u.id = $1\n            GROUP BY u.id, u.balance\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "balance",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "balance"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "holdings_value!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_value!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_invested!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_delta!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ef05d2429be6d3635dd9ef73b7e59b8a1c4e267ecae1b23edfcfa00688f5c5c0"
+}

@@ -1,0 +1,6 @@
+# Mantém o contexto de build enxuto e sem segredos.
+target/
+.git/
+.env
+assets/
+*.md

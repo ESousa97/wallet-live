@@ -12,6 +12,34 @@ services:
       # No Postgres 18+ o mount vai em /var/lib/postgresql (os dados ficam
       # numa subpasta versionada), e não mais em /var/lib/postgresql/data.
       - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Serviço da aplicação (perfil opcional: `docker compose --profile app up`).
+  # No dia a dia de desenvolvimento usa-se `cargo run` contra o db acima; este
+  # serviço builda a imagem de produção e sobe o stack completo — as migrações
+  # rodam sozinhas no boot.
+  app:
+    build: .
+    profiles: ["app"]
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-dev-admin-secret-change-me}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-with-a-long-random-value}
+      LOG_FORMAT: json
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   pgdata:

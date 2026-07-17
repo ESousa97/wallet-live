@@ -5,3 +5,7 @@
 
 # Snapshots pendentes do insta (os aceitos, .snap, são versionados).
 *.snap.new
+
+# CAs específicos da máquina para o build Docker (ver docker/extra-ca/README.md).
+docker/extra-ca/*.crt
+docker/extra-ca/*.cer

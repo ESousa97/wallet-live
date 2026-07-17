@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE assets AS a\n            SET unit_value = u.value\n            FROM UNNEST($1::text[], $2::numeric[]) AS u(name, value)\n            WHERE LOWER(TRIM(a.name)) = u.name\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "NumericArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bdb1b288e92fb3f5c5c2d71d6cb85b2b18cbcc614434716a41ee2c904c703411"
+}

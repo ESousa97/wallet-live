@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE holdings SET quantity = quantity - $3 WHERE user_id = $1 AND asset_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a801489ebe2be115a3bdb764d4bcdce9e049e8fb94f7c00836e30a6f018fe5a"
+}
