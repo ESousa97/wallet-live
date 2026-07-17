@@ -1,253 +1,153 @@
-# wallet :: restful stack
+# wallet
 
-Carteira digital de investimentos construída **inteiramente em Rust** — backend
-e frontend. Projeto do curso *RESTful Stack* (DIO), com o instrutor Breno Lemos.
+Carteira digital de investimentos escrita **inteiramente em Rust** — backend e
+frontend servidos pelo mesmo binário. API REST administrativa (JSON) e interface
+do usuário renderizada no servidor (SSR), com **valores monetários exatos**,
+operações **transacionais** e cotações de mercado reais.
 
-> Status: **Final — Carteira completa** ✅
-> Além da API do admin e da sessão stateless via JWT, o usuário tem uma **tela de
-> ativos** (`/assets`) com **saldo em caixa**, **posições** (quantidade, preço,
-> custo médio e lucro/prejuízo por ativo), **resumo do patrimônio** e o
-> **histórico de transações**. As operações são **depositar**, **comprar**,
-> **vender** e **atualizar cotações** (preços de mercado reais via API da
-> Coinbase) — tudo com valores monetários exatos (`rust_decimal`) — e **logout**.
+## Funcionalidades
+
+- **Carteira completa** — saldo em caixa, depósito, compra e venda de ativos ao
+  preço de mercado, custo médio ponderado por posição, lucro/prejuízo por ativo
+  e resumo do patrimônio.
+- **Extrato** — livro-razão imutável de transações (depósitos, compras, vendas).
+- **Cotações reais** — sincronização de preços (`USD→BRL`, `BTC→BRL`) via API
+  pública da Coinbase, aplicada em um único `UPDATE` (sem N+1).
+- **Autenticação e sessão** — cadastro/login com hash de senha (argon2); sessão
+  com **JWT de acesso curto** + **refresh token rotacionado e revogável**
+  (logout mata a sessão no servidor), ambos em cookies `HttpOnly` +
+  `SameSite=Strict`; **lockout progressivo** contra força bruta e **CSRF
+  tokens** em todos os formulários.
+- **API administrativa** — catálogo de ativos sob `/api/v1`, autorizada por
+  **papel de usuário** (sessão de admin) ou por credencial de serviço com
+  comparação em tempo constante.
+- **Pronto para orquestração** — sonda `/health` (serviço + banco), desligamento
+  gracioso e logs estruturados (`tracing`).
+
+## Decisões de engenharia
+
+| Tema | Decisão |
+| --- | --- |
+| Dinheiro | `rust_decimal::Decimal` ↔ `NUMERIC` no Postgres. Ponto flutuante nunca toca valor monetário. |
+| Consistência | Compra/venda/depósito rodam em transação com `FOR UPDATE`; saldo insuficiente reverte tudo. O schema tem `CHECK`s (saldo, preço e quantidade não negativos) como última linha de defesa. |
+| Modelo de dados | `holdings` materializa a posição atual por (usuário, ativo); `transactions` é o histórico imutável. Leituras triviais, escrita explícita. |
+| SQL | `sqlx::query_as!` — toda query é **checada em tempo de compilação** contra o banco. Schema divergente = não compila. |
+| Injeção de dependência | Extratores do Axum (`Repository`, `User`, `Admin`): a assinatura do handler declara o que ele exige; sem satisfazer, o handler nem roda. |
+| Sessão | JWT de acesso curto (stateless) + refresh token opaco com rotação a cada uso e hash SHA-256 no banco — revogável de verdade, replay de token queimado não funciona. Renovação transparente via middleware. |
+| Defesas HTTP | CSRF *double-submit* nos formulários, lockout com backoff no login, CSP + `nosniff` + `X-Frame-Options` + `Referrer-Policy` em toda resposta, HSTS atrás de HTTPS. |
+| Erros | Enum único (`AppError`) mapeado para status HTTP corretos; falhas 5xx são logadas com causa raiz e respondidas com mensagem genérica (nada de detalhe interno na resposta). |
+| Configuração | Lida e validada **uma vez** no boot (*fail-fast*): segredo ausente derruba o serviço com mensagem clara, não um 401 confuso em produção. |
+| Templates | Askama — variáveis dos templates também checadas em compilação. |
 
 ## Estrutura
-
-Crate: **`wallet`** (nome curto, sem traço). A UI segue a estética da demo do
-curso: textos em inglês minúsculo e fonte monoespaçada.
 
 ```
 src/
   main.rs            # enxuta: tokio::main -> App::start()
-  app.rs             # App (boot, /health, shutdown gracioso) + AppState { db, config }
-  config.rs          # Config: lê e valida os segredos do ambiente UMA vez (fail-fast)
+  app.rs             # boot, AppState { db, config }, /health, shutdown gracioso
+  config.rs          # Config: lê e valida o ambiente uma vez (fail-fast)
   models.rs          # Asset, UserRecord, WalletSummary, Holding, Transaction
-  error.rs           # AppError + IntoResponse (status HTTP, log de 5xx) + conversões
-  quotes.rs          # cotações de mercado (Coinbase) -> atualiza preços dos ativos
-  repository.rs      # Repository: todo o acesso ao banco (queries) + testes do core
+  error.rs           # AppError + IntoResponse (status HTTP, censura de 5xx)
+  quotes.rs          # cotações de mercado (Coinbase) -> preços dos ativos
+  repository.rs      # todo o acesso ao banco (queries + transações) + testes
   auth/
-    admin.rs         # extrator Admin (autenticação por secret key, p/ a API)
-    user.rs          # User/UnauthenticatedUser, hash de senha, JWT e extratores
+    admin.rs         # extrator Admin (sessão com role admin OU credencial de serviço)
+    user.rs          # User/UnauthenticatedUser, hash de senha, JWT, extratores
+    session.rs       # refresh token (rotação/revogação) + middleware de renovação
+    csrf.rs          # proteção CSRF (double-submit cookie)
+    throttle.rs      # lockout progressivo de login
   routes/
-    api.rs           # API REST do admin (JSON) + testes (#[sqlx::test] + insta)
-    frontend.rs      # front-end SSR (HTML): login/logout, carteira, operações, filtros
-    fixtures/        # dados SQL para testes (bitcoin_asset.sql)
-    snapshots/       # snapshots aceitos do insta (.snap)
-templates/
-  base.html          # esqueleto comum (head, Tailwind, fonte mono); as páginas o estendem
-  login.html         # tela de login ({% extends "base.html" %})
-  assets.html        # carteira: saldo, posições, resumo, transações e operações
-migrations/          # assets + users + holdings/transactions + ajustes ({up,down}.sql)
-docker-compose.yaml
-.env / .env.example
+    api.rs           # API REST administrativa (JSON) + testes de snapshot
+    frontend.rs      # SSR: login/logout, carteira, operações, filtros Askama
+templates/           # base.html (esqueleto) + login.html + assets.html
+migrations/          # schema versionado, up/down reversíveis
 ```
-
-## O que tem hoje
-
-O servidor Axum serve **duas coisas** ao mesmo tempo:
-
-1. **API REST do admin** (JSON, sob `/api`) — cadastra/lista/atualiza ativos.
-2. **Front-end SSR** (HTML, na raiz) — telas de login/cadastro e index do usuário.
-
-### Banco e repository (Aula 3)
-
-- **Banco no estado** — `AppState { db: PgPool }`. A `PgPool` é um `Arc` por
-  dentro, então clonar o estado clona só o ponteiro, não as conexões.
-- **Padrão repository** — `Repository` concentra todas as queries (de ativos e de
-  usuários). Os handlers não sabem como o banco funciona, só que ele existe;
-  mudou o esquema, muda só o repository. Ele também é um **extrator** do Axum
-  (`FromRequestParts`, `Rejection = Infallible`), injetado direto nos endpoints.
-- **Queries checadas em compilação** — `sqlx::query_as!` valida cada SQL contra o
-  banco real **na hora de compilar**. Se a tabela/coluna não existir, o programa
-  não compila. (Por isso o Postgres precisa estar no ar para buildar.)
-- **Migrações** — versionadas em `migrations/`, com `up`/`down` reversíveis
-  (`create_assets` e `create_users`).
-- **Testes** — `#[sqlx::test]` cria um banco efêmero por teste, roda as migrações
-  e aplica *fixtures*; o **insta** garante que o JSON de resposta não mude sem
-  querer (snapshot testing).
-
-### Usuários e senha (Aula 4)
-
-- **Modelo `users`** — `id` (BIGSERIAL), `username` (TEXT **UNIQUE** — é a chave
-  de login, como um e-mail seria) e `password_hash` (TEXT).
-- **Nunca senha em texto livre** — usamos a lib **`password-auth`** (argon2id por
-  padrão) para gerar/verificar a hash. O `UserRecord` (linha crua do banco) **não**
-  deriva `Serialize` de propósito: nada de vazar a hash numa resposta.
-- **Tipos que modelam o fluxo** — `UnauthenticatedUser` (nome + senha em texto
-  livre, vindos do formulário) vira um `User` (autenticado, campos privados) por
-  um de dois caminhos: `authenticate` (confere a senha de um usuário existente) ou
-  `register` (cadastra um novo). A única forma de obter um `User` é passando por
-  um desses fluxos — tê-lo em mãos é prova de que a autenticação aconteceu.
-- **Uma tela só** — para simplificar, a tela de login serve aos dois propósitos:
-  se o usuário não existe, é **cadastrado**; se existe, faz **login**.
-
-### Sessão com JWT + cookies (Aula 5)
-
-- **Login grava um cookie e redireciona** — ao autenticar/cadastrar, o back-end
-  gera um **JWT** assinado (HS256, válido por 10 min), guarda-o num **cookie
-  `HttpOnly`** chamado `token` e redireciona para `/`.
-- **Stateless** — não há sessão no servidor. O navegador reenvia o cookie
-  automaticamente; o back-end **valida a assinatura** do token com a `SECRET_KEY`
-  (só ele a conhece) e reconstrói o usuário. Token fabricado, adulterado ou
-  expirado **não passa** na validação.
-- **Extratores** — `User` (exige sessão válida) e `Option<User>` (tolerante:
-  ausência/invalidez vira `None`, sem erro). A tela `index` usa o `Option<User>`:
-  com sessão mostra `Hello <usuário>`; sem ela, **redireciona para `/login`** em
-  vez de devolver um erro feio.
-
-> ⚠️ **Didático, não pronto para produção.** Toda a autenticação foi feita "na
-> mão" para desmistificar como JWT e cookies funcionam. Os segredos vêm do
-> ambiente (ver `config.rs`), mas não há *refresh token* nem rotação de chave, e
-> o JWT expira em 10 min sem renovação. Em um projeto real, prefira uma solução
-> de autenticação consolidada.
-
-### Carteira: saldo, posições e transações (Final)
-
-- **Dinheiro exato com `rust_decimal`** — saldo, preços, quantidades e custo
-  médio são `Decimal` (mapeado em `NUMERIC` no Postgres). Nada de `f64`: não há
-  ruído de arredondamento de ponto flutuante em valores monetários.
-- **`holdings` + `transactions`, não um log de compras** — em vez de derivar
-  tudo de um histórico append-only, o esquema separa duas preocupações:
-  - **`holdings`** — a **posição atual** por `(user, asset)`: `quantity` possuída
-    e `avg_cost` (custo médio ponderado). Mutada atomicamente em cada compra/venda.
-  - **`transactions`** — o **livro-razão imutável** de tudo o que aconteceu
-    (`deposit`, `buy`, `sell`), usado para a tela de histórico e auditoria.
-  Manter a posição materializada deixa as leituras triviais (sem agregação
-  pesada) e torna a lógica de mover dinheiro um `UPDATE` transacional explícito.
-- **Operações transacionais** (`repository.rs`):
-  - `deposit` — credita o saldo e registra a transação.
-  - `buy_asset` — trava o ativo e o usuário (`FOR UPDATE`), confere saldo, debita,
-    abre/atualiza a posição recalculando o **custo médio ponderado** via
-    `ON CONFLICT ... DO UPDATE`, e registra a transação. Tudo numa transação:
-    saldo insuficiente reverte sem deixar rastro.
-  - `sell_asset` — confere a posição, credita o saldo ao preço atual, reduz a
-    quantidade (ou apaga a posição se zerar) e registra a transação.
-  Cada uma é coberta por testes `#[sqlx::test]` (ver "Testes").
-- **Resumo do patrimônio no banco** — `wallet_summary` calcula numa query só:
-  saldo em caixa, valor das posições (`Σ quantidade × preço`), patrimônio total,
-  total investido (`Σ quantidade × custo_médio`) e resultado dos ativos
-  (`Σ quantidade × (preço − custo_médio)`).
-- **Cotações de mercado reais** (`quotes.rs`) — "atualizar cotações" busca
-  `USD→BRL` e `BTC→BRL` na API pública da Coinbase (concorrente via
-  `tokio::try_join!`) e aplica os preços aos ativos cujo nome casa (bitcoin, btc,
-  dólar, real…) em **um único `UPDATE` com `UNNEST`** (sem N+1).
-- **Tela `/assets`** — busca resumo, posições, ativos disponíveis e transações
-  em paralelo (`tokio::try_join!`), já que nenhuma query depende das outras. As
-  operações (depositar/comprar/vender) abrem um formulário inline na própria tela.
-- **Lucro/prejuízo colorido** — o filtro `nonnegative` decide entre verde
-  (`text-emerald-400`, com prefixo `+`) e vermelho (`text-rose-400`), no resumo,
-  por posição e nas transações.
-- **Filtros Askama customizados** (`#[askama::filter_fn]`, módulo `filters` em
-  `frontend.rs`): `human_datetime` (`AAAA-MM-DD HH:MM`), `money` (formata
-  `Decimal` como `R$ 1.234,56`, com separador de milhar e duas casas),
-  `quantity` (normaliza o `Decimal`, sem zeros à toa), `nonnegative` e
-  `transaction_kind` (rótulo em pt-BR para `deposit`/`buy`/`sell`).
-- **Estado vazio e acessibilidade** — *empty states* dedicados, `focus-visible`,
-  `scope="col"`, `inputmode="decimal"`/`autocomplete` nos formulários, favicon
-  SVG inline e `color-scheme: dark` no `base.html`.
-- **Herança de templates** — `base.html` concentra o esqueleto comum; `login.html`
-  e `assets.html` preenchem `title`/`content` com `{% extends "base.html" %}`.
-- **Logout** — `GET /logout` remove o cookie `token` e redireciona para `/login`.
-- **Index = roteador puro** — `/` com sessão vai para `/assets`; sem ela, `/login`.
 
 ## Rotas
 
-### Front-end (HTML, na raiz)
+### Interface do usuário (HTML, na raiz)
 
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
-| `GET` | `/health` | — | Sonda de saúde (200 se o serviço e o banco respondem) |
-| `GET` | `/login` · `/register` | — | Formulário de login / cadastro |
-| `POST` | `/login` · `/register` | — | Autentica ou cadastra; grava o cookie `token` e vai para `/` |
-| `GET` | `/logout` | — | Remove o cookie `token` e redireciona para `/login` |
-| `GET` | `/` | opcional | Roteador: com sessão vai para `/assets`, sem ela para `/login` |
-| `GET` | `/assets` | sessão | Carteira: saldo, posições, resumo e transações |
+| `GET` | `/health` | — | Sonda de saúde (200 se serviço e banco respondem) |
+| `GET` | `/login` · `/register` | — | Formulários de login / cadastro |
+| `POST` | `/login` · `/register` | — | Autentica ou cadastra; grava o cookie de sessão |
+| `GET` | `/logout` | — | Revoga a sessão no servidor e remove os cookies |
+| `GET` | `/` | opcional | Com sessão vai para `/assets`; sem, para `/login` |
+| `GET` | `/assets` | sessão | Carteira: saldo, posições, resumo e extrato (paginado via `?page=`) |
 | `POST` | `/deposit` | sessão | Deposita saldo (`amount`) |
 | `POST` | `/buy` | sessão | Compra um ativo (`asset_id`, `quantity`) ao preço atual |
 | `POST` | `/sell` | sessão | Vende um ativo (`asset_id`, `quantity`) ao preço atual |
 | `POST` | `/quotes/sync` | sessão | Atualiza os preços com cotações de mercado |
 
-### API do admin (JSON, sob `/api`)
+### API administrativa (JSON, sob `/api/v1` — `/api` mantido como alias)
 
-Os de escrita exigem o header `Authorization: I'm the admin`.
+Escritas exigem **sessão de um usuário com papel `admin`** ou o header de
+serviço `Authorization: <ADMIN_SECRET_KEY>`.
 
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
-| `GET` | `/api/assets` | — | Lista os ativos |
-| `POST` | `/api/assets` | admin | Cadastra um ativo (`{name, unit_value}`) |
-| `PATCH` | `/api/assets` | admin | Atualiza um ativo (`{id, name?, unit_value?}`) |
+| `GET` | `/api/v1/assets` | — | Lista os ativos |
+| `POST` | `/api/v1/assets` | admin | Cadastra um ativo (`{name, unit_value}`) |
+| `PATCH` | `/api/v1/assets` | admin | Atualiza um ativo (`{id, name?, unit_value?}`) |
 
-Erros: `400` header ausente / username já em uso, `401` credencial ou token
-inválido, `404` ativo/usuário inexistente, `500` erro de banco ou template.
+Erros: `400` entrada inválida (header ausente, nome vazio, preço negativo,
+quantia não positiva, saldo/posição insuficiente, username em uso), `401`
+credencial ou token inválido, `403` token CSRF ausente/divergente, `404`
+recurso inexistente, `429` lockout por excesso de tentativas de login, `502`
+cotação indisponível, `500` falha interna (detalhes apenas no log do servidor).
+
+## Configuração
+
+Variáveis de ambiente (ver `.env.example`):
+
+| Variável | Obrigatória | Descrição |
+| --- | --- | --- |
+| `DATABASE_URL` | sim | Conexão com o Postgres |
+| `ADMIN_SECRET_KEY` | sim | Credencial da API administrativa |
+| `JWT_SECRET` | sim | Chave de assinatura dos tokens de sessão |
+| `COOKIE_SECURE` | não (`false`) | Marca os cookies como `Secure` e liga o HSTS (use `true` atrás de HTTPS) |
+| `BIND_ADDR` | não (`0.0.0.0:3000`) | Endereço/porta de escuta |
+| `SESSION_TTL_MINUTES` | não (`10`) | Validade do token de acesso |
+| `REFRESH_TTL_DAYS` | não (`14`) | Validade do refresh token (sessão no servidor) |
+| `RUST_LOG` | não (`info`) | Nível de log (ex.: `wallet=debug,info`) |
 
 ## Como rodar
 
-Pré-requisitos: [Rust](https://rustup.rs), Docker (ou um Postgres próprio) e,
-opcionalmente, `psql`.
+Pré-requisitos: [Rust](https://rustup.rs) e Docker (ou um Postgres próprio).
 
 ```powershell
 # 1) subir o Postgres
 docker compose up -d
 
-# 2) configurar a conexão (copie o exemplo, ajuste se precisar)
+# 2) configurar o ambiente (copie o exemplo e ajuste os segredos)
 Copy-Item .env.example .env
 
-# 3) criar as tabelas (todas as migrações de migrations/). Com a CLI do SQLx:
+# 3) aplicar as migrações
 cargo install sqlx-cli --no-default-features --features postgres,rustls
 cargo sqlx migrate run
-#    Sem a CLI, aplique os arquivos *.up.sql de migrations/ em ordem com psql.
 
-# 4) rodar (o Postgres precisa estar no ar — o SQLx checa as queries ao compilar)
+# 4) rodar (o Postgres precisa estar no ar: o SQLx valida as queries ao compilar)
 cargo run
 ```
 
-> O `DATABASE_URL` precisa estar disponível **na hora de compilar** (o `.env` já
-> resolve isso, pois o SQLx o lê automaticamente). As credenciais do `.env`
-> batem com o `docker-compose.yaml`.
+Abra <http://localhost:3000>, cadastre um usuário e use a carteira: deposite,
+compre/venda ativos e sincronize as cotações. A sessão persiste no cookie;
+token removido, adulterado ou expirado leva de volta ao login.
 
-### Usando o front-end
-
-Abra <http://localhost:3000/login>, digite um usuário e senha e clique em
-**entrar**:
-
-- usuário **novo** → é cadastrado na hora (a mesma tela serve para login e
-  cadastro), e você já entra;
-- usuário **existente** → faz login validando a senha.
-
-Depois de entrar você cai em `/assets`. Pode dar **F5** à vontade: a sessão
-fica no cookie. Se o cookie `token` for removido ou adulterado, você é mandado
-de volta para `/login`.
-
-Na tela de ativos:
-
-- cada ativo que você já comprou aparece num card, com a quantidade total, o
-  valor unitário atual e o **lucro/prejuízo total** (verde com `+` se positivo,
-  vermelho se negativo);
-- clique em **histórico de compras** para expandir a tabela com cada compra
-  individual (data, quantidade, valor pago e variação);
-- clique em **registrar compra** para abrir o formulário (escolha o ativo, a
-  quantidade e o valor unitário pago) — ao confirmar, a página recarrega com o
-  novo total já recalculado;
-- **sair** remove o cookie e volta para `/login`.
-
-### Usando a API do admin
-
-No PowerShell, prefira `Invoke-RestMethod` (ele já desserializa a resposta):
+### Exemplo de uso da API administrativa
 
 ```powershell
-$admin = @{ Authorization = "I'm the admin" }
+$admin = @{ Authorization = $env:ADMIN_SECRET_KEY }
 
-Invoke-RestMethod http://127.0.0.1:3000/api/assets
+Invoke-RestMethod http://127.0.0.1:3000/api/v1/assets
 
-Invoke-RestMethod -Method Post http://127.0.0.1:3000/api/assets -Headers $admin `
+Invoke-RestMethod -Method Post http://127.0.0.1:3000/api/v1/assets -Headers $admin `
   -ContentType 'application/json' -Body '{"name":"bitcoin","unit_value":10}'
 
-Invoke-RestMethod -Method Patch http://127.0.0.1:3000/api/assets -Headers $admin `
+Invoke-RestMethod -Method Patch http://127.0.0.1:3000/api/v1/assets -Headers $admin `
   -ContentType 'application/json' -Body '{"id":1,"unit_value":20}'
 ```
-
-> Com `curl.exe`, use aspas **simples** no JSON e **não** escape as aspas com
-> `\` (no PowerShell as aspas simples já são literais).
 
 ## Testes
 
@@ -255,79 +155,32 @@ Invoke-RestMethod -Method Patch http://127.0.0.1:3000/api/assets -Headers $admin
 cargo test
 ```
 
-Os testes usam `#[sqlx::test]` (precisa do Postgres no ar) e **insta** para os
-snapshots. Para revisar/atualizar snapshots: `cargo install cargo-insta` e
-`cargo insta review` — ou rode os testes uma vez com `$env:INSTA_UPDATE='always'`.
+- `#[sqlx::test]` cria um **banco efêmero por teste** (migrações aplicadas
+  automaticamente), então os testes são isolados e paralelos.
+- O **núcleo financeiro** tem cobertura dedicada: depósito, compra, venda,
+  custo médio ponderado, guardas de saldo/posição insuficientes e validação de
+  entradas.
+- O contrato JSON da API é congelado com **insta** (snapshot testing):
+  `cargo insta review` para auditar mudanças de formato.
 
-Cobertura: além dos snapshots da API do admin, o **núcleo financeiro** tem
-testes dedicados em `repository.rs` (depósito, compra, venda, custo médio
-ponderado, e as guardas de saldo/posição insuficientes), cada um num banco
-efêmero isolado.
+## Roadmap
 
-## Refinamentos de engenharia
+O plano de evolução — segurança de sessão, camada de serviço, CI/CD,
+observabilidade e novas funcionalidades — está em [ROADMAP.md](ROADMAP.md).
 
-Sobre a base do curso, alguns ajustes de gente grande:
+## Tecnologias
 
-- **Configuração centralizada e *fail-fast*** (`config.rs`) — os segredos são
-  lidos e validados **uma vez** no boot. Falta um segredo? O serviço não sobe, com
-  mensagem clara — em vez de devolver um `401` confuso na primeira requisição.
-- **Sem releitura de ambiente por requisição** — `JWT_SECRET`, `ADMIN_SECRET_KEY`
-  e `COOKIE_SECURE` ficam na `AppState`; validar token/credencial não toca mais o
-  ambiente a cada chamada.
-- **Erros 5xx não vazam detalhes** — falhas internas são logadas no servidor com a
-  causa raiz e respondidas ao cliente com uma mensagem genérica (nada de texto de
-  erro do SQL na resposta).
-- **Startup robusto** — `.env` ausente não é fatal (produção usa o ambiente real),
-  `RUST_LOG` controla o nível de log (`EnvFilter`), desligamento gracioso no
-  Ctrl+C e endereço de escuta configurável (`BIND_ADDR`).
-- **Sonda `/health`** — confirma serviço + banco para health checks de
-  orquestradores.
-- **Sem N+1** — a sincronização de cotações virou um único `UPDATE ... UNNEST`.
-
-## Teste funcional
-
-A sequência completa em funcionamento: subir o Postgres (`docker compose up`),
-aplicar as migrações, rodar o servidor (`cargo run`) e exercer a API com
-`Invoke-RestMethod` (GET/POST/PATCH), além da suíte de testes passando
-(`cargo test` → 13 passed). _(A captura abaixo é de uma execução anterior, com a
-suíte ainda menor.)_
-
-![Teste funcional: docker compose up, migração, cargo run com logs do servidor e queries, requisições à API via Invoke-RestMethod e cargo test com 3 testes passando](assets/2026-06-02_23-18.png)
+**axum** (+ axum-extra), **tokio**, **sqlx** (Postgres, compile-time checked),
+**askama**, **rust_decimal**, **password-auth** (argon2), **jwt-simple**,
+**subtle**, **reqwest**, **tracing**, **thiserror**, **color-eyre**, **serde**.
+Em testes: **insta**.
 
 ## Notas de ambiente (Windows)
 
 - **TLS do cargo:** o download de dependências pode falhar com
   `CRYPT_E_NO_REVOCATION_CHECK`; o `.cargo/config.toml` já desativa só a checagem
   de revogação.
-- **Postgres 18 no Docker:** o volume é montado em `/var/lib/postgresql` (e não
-  mais em `/var/lib/postgresql/data`, convenção que mudou na imagem 18+).
-- **`jwt-simple` sem `cmake`:** por padrão a lib usa BoringSSL, que exige `cmake`
-  + toolchain C++. O `Cargo.toml` a configura com
-  `default-features = false, features = ["pure-rust"]` para usar criptografia
-  100% Rust e dispensar o `cmake`.
-
-## Tecnologias
-
-Em uso: **axum** (+ **axum-extra** para cookies), **tokio**, **sqlx** (Postgres,
-compile-time checked), **askama** (templates SSR), **password-auth** (hash
-argon2), **jwt-simple** (JWT), **dotenvy** (.env), **tracing** +
-**tracing-subscriber**, **color-eyre**, **serde** / **serde_json**,
-**thiserror**. Em testes: **insta** (snapshots).
-
-## Cronograma
-
-- **Aula 1 — Introdução** ✅: visão geral e fundação do repositório.
-- **Aula 2 — Primeiros passos com Axum** ✅: API REST do admin, auth por *secret
-  key*, armazenamento em memória e tratamento de erros.
-- **Aula 3 — SQLx + Postgres** ✅: banco Postgres via SQLx, padrão repository,
-  migrações em SQL e testes (`#[sqlx::test]` + insta).
-- **Aula 4 — Primeira tela (Askama)** ✅: modelo de usuário no banco (senha com
-  hash argon2), tela de login/cadastro renderizada no servidor.
-- **Aula 5 — Autenticação stateless com JWT** ✅: sessão via JWT assinado em
-  cookie HttpOnly; index que redireciona ao login quando não há sessão válida.
-- **Final — Carteira completa** ✅: dinheiro exato com `rust_decimal`, esquema
-  `holdings` + `transactions`, operações transacionais (depositar/comprar/vender)
-  com custo médio ponderado, resumo do patrimônio e cotações de mercado reais
-  (Coinbase). Acrescido de refinamentos de engenharia: configuração *fail-fast*,
-  sonda `/health`, desligamento gracioso, censura de erros 5xx na resposta e
-  testes do núcleo financeiro (ver "Refinamentos de engenharia").
+- **Postgres 18 no Docker:** o volume é montado em `/var/lib/postgresql`
+  (convenção da imagem 18+).
+- **`jwt-simple` sem `cmake`:** configurado com `pure-rust` para dispensar
+  BoringSSL/cmake.
