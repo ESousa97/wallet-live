@@ -66,12 +66,22 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
 
 ## ⚙️ Fase 4 — Operação
 
-- [ ] CI: `fmt --check`, `clippy -D warnings`, testes com Postgres em service
-  container, `sqlx prepare --check` (build offline) e auditoria de dependências.
-- [ ] Dockerfile multi-stage do serviço + compose completo (app + banco).
-- [ ] Migrações aplicadas automaticamente no boot.
-- [ ] Logs em JSON, propagação de `request_id` e exportação OpenTelemetry.
-- [ ] Sondas de *liveness*/*readiness* separadas.
+- [x] CI (GitHub Actions): `fmt --check`, `clippy -D warnings`, testes com
+  Postgres em service container, `cargo sqlx prepare --check` (o cache offline
+  `.sqlx/` é versionado — lint e build dispensam banco), `cargo audit` e build
+  da imagem Docker.
+- [x] Dockerfile multi-stage: binário único (templates e migrações embutidos),
+  usuário sem privilégios, `SQLX_OFFLINE`; serviço `app` no compose (perfil
+  opcional) com healthchecks; suporte a CA extra para ambientes com inspeção
+  TLS (proxy corporativo/antivírus).
+- [x] Migrações aplicadas automaticamente no boot — o serviço nunca sobe com
+  schema defasado e o deploy dispensa passo manual.
+- [x] Logs em JSON (`LOG_FORMAT=json`) e `request_id` por requisição
+  (propagado do `x-request-id` quando bem-formado, senão gerado; devolvido na
+  resposta e presente em todos os logs do span).
+- [x] Sondas separadas: liveness (`/healthz`, sem tocar o banco) e readiness
+  (`/readyz`, exige o banco são).
+- [ ] Exportação OpenTelemetry (traces e métricas).
 
 ## 📈 Fase 5 — Produto e UX
 

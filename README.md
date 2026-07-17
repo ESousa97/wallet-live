@@ -21,8 +21,10 @@ operações **transacionais** e cotações de mercado reais.
 - **API administrativa** — catálogo de ativos sob `/api/v1`, autorizada por
   **papel de usuário** (sessão de admin) ou por credencial de serviço com
   comparação em tempo constante.
-- **Pronto para orquestração** — sonda `/health` (serviço + banco), desligamento
-  gracioso e logs estruturados (`tracing`).
+- **Pronto para orquestração** — migrações aplicadas no boot, sondas de
+  liveness/readiness separadas (`/healthz`, `/readyz`), desligamento gracioso,
+  logs estruturados com `request_id` por requisição (JSON opcional) e imagem
+  Docker multi-stage.
 
 ## Decisões de engenharia
 
@@ -71,7 +73,8 @@ migrations/          # schema versionado, up/down reversíveis
 
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
-| `GET` | `/health` | — | Sonda de saúde (200 se serviço e banco respondem) |
+| `GET` | `/healthz` | — | Liveness: o processo responde (não depende do banco) |
+| `GET` | `/readyz` · `/health` | — | Readiness: pronto para tráfego (banco respondendo) |
 | `GET` | `/login` · `/register` | — | Formulários de login / cadastro |
 | `POST` | `/login` · `/register` | — | Autentica ou cadastra; grava o cookie de sessão |
 | `GET` | `/logout` | — | Revoga a sessão no servidor e remove os cookies |
@@ -113,6 +116,7 @@ Variáveis de ambiente (ver `.env.example`):
 | `BIND_ADDR` | não (`0.0.0.0:3000`) | Endereço/porta de escuta |
 | `SESSION_TTL_MINUTES` | não (`10`) | Validade do token de acesso |
 | `REFRESH_TTL_DAYS` | não (`14`) | Validade do refresh token (sessão no servidor) |
+| `LOG_FORMAT` | não (texto) | `json` emite uma linha JSON por evento (agregadores de log) |
 | `RUST_LOG` | não (`info`) | Nível de log (ex.: `wallet=debug,info`) |
 
 ## Como rodar
@@ -126,13 +130,26 @@ docker compose up -d
 # 2) configurar o ambiente (copie o exemplo e ajuste os segredos)
 Copy-Item .env.example .env
 
-# 3) aplicar as migrações
-cargo install sqlx-cli --no-default-features --features postgres,rustls
-cargo sqlx migrate run
-
-# 4) rodar (o Postgres precisa estar no ar: o SQLx valida as queries ao compilar)
+# 3) rodar — as migrações são aplicadas automaticamente no boot
 cargo run
 ```
+
+> O cache `.sqlx/` versionado permite compilar sem banco (`SQLX_OFFLINE=true`).
+> Para o fluxo de desenvolvimento com banco vivo, a CLI ajuda a criar novas
+> migrações e a regenerar o cache:
+> `cargo install sqlx-cli --no-default-features --features postgres,rustls`
+> e depois `cargo sqlx migrate add -r <nome>` / `cargo sqlx prepare`.
+
+### Stack completo em Docker
+
+```powershell
+docker compose --profile app up --build
+```
+
+Builda a imagem de produção (multi-stage, binário único com templates e
+migrações embutidos) e sobe app + banco com healthchecks. Em máquinas atrás de
+proxy corporativo ou antivírus com inspeção TLS, veja
+`docker/extra-ca/README.md`.
 
 Abra <http://localhost:3000>, cadastre um usuário e use a carteira: deposite,
 compre/venda ativos e sincronize as cotações. A sessão persiste no cookie;
