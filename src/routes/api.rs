@@ -3,6 +3,7 @@ use axum::{Json, Router};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::instrument;
+use utoipa::{OpenApi, ToSchema};
 
 use crate::app::AppState;
 use crate::auth::admin::Admin;
@@ -10,29 +11,68 @@ use crate::error::AppError;
 use crate::models::Asset;
 use crate::repository::Repository;
 
+/// Especificação OpenAPI gerada DO CÓDIGO: os `#[utoipa::path]` dos handlers e
+/// os `ToSchema` dos tipos são a única fonte — documentação não descola da
+/// implementação. Servida em `/api/v1/openapi.json`.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "wallet — API administrativa",
+        description = "Gestão do catálogo de ativos. Operações de escrita exigem \
+                       sessão de um usuário com papel `admin` ou o header \
+                       `Authorization` com a credencial de serviço.",
+        version = "1.0.0"
+    ),
+    paths(list_assets, create_asset, update_asset),
+    components(schemas(Asset, CreateAssetRequest, UpdateAssetRequest))
+)]
+struct ApiDoc;
+
 /// Monta as rotas da API. O router ainda espera um `AppState` (de onde o
 /// `Repository` é extraído).
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/assets",
-        get(list_assets).post(create_asset).patch(update_asset),
-    )
+    Router::new()
+        .route(
+            "/assets",
+            get(list_assets).post(create_asset).patch(update_asset),
+        )
+        .route("/openapi.json", get(openapi_spec))
+}
+
+async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
+    Json(ApiDoc::openapi())
 }
 
 /// Lista todos os ativos.
+#[utoipa::path(
+    get,
+    path = "/api/v1/assets",
+    responses((status = 200, description = "Catálogo de ativos", body = [Asset]))
+)]
 #[instrument(skip_all)]
 async fn list_assets(repository: Repository) -> Result<Json<Vec<Asset>>, AppError> {
     let assets = repository.list_assets().await?;
     Ok(Json(assets))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 struct CreateAssetRequest {
     name: String,
+    /// Preço unitário inicial (decimal como string; nunca negativo).
     unit_value: Decimal,
 }
 
 /// Cadastra um novo ativo. Protegido: exige o `Admin`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/assets",
+    request_body = CreateAssetRequest,
+    responses(
+        (status = 200, description = "Ativo criado", body = Asset),
+        (status = 400, description = "Entrada inválida (nome vazio, preço negativo)"),
+        (status = 401, description = "Credencial inválida")
+    )
+)]
 #[instrument(skip_all)]
 async fn create_asset(
     _admin: Admin,
@@ -45,15 +85,27 @@ async fn create_asset(
     Ok(Json(new_asset))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 struct UpdateAssetRequest {
     id: i64,
     name: Option<String>,
+    /// Novo preço unitário (decimal como string; nunca negativo).
     unit_value: Option<Decimal>,
 }
 
 /// Atualiza um ativo existente. Protegido: exige o `Admin`. Nome e valor são
 /// opcionais — só os campos enviados são alterados.
+#[utoipa::path(
+    patch,
+    path = "/api/v1/assets",
+    request_body = UpdateAssetRequest,
+    responses(
+        (status = 200, description = "Ativo atualizado", body = Asset),
+        (status = 400, description = "Entrada inválida"),
+        (status = 401, description = "Credencial inválida"),
+        (status = 404, description = "Ativo inexistente")
+    )
+)]
 #[instrument(skip_all)]
 async fn update_asset(
     _admin: Admin,
@@ -74,6 +126,19 @@ async fn update_asset(
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+
+    #[test]
+    fn openapi_spec_covers_the_asset_routes() {
+        let spec = ApiDoc::openapi().to_json().expect("serializable spec");
+
+        assert!(spec.contains("/api/v1/assets"));
+        assert!(spec.contains("CreateAssetRequest"));
+        assert!(spec.contains("UpdateAssetRequest"));
+        // Os três verbos documentados.
+        for verb in ["get", "post", "patch"] {
+            assert!(spec.contains(&format!("\"{verb}\"")), "faltou {verb}");
+        }
+    }
 
     #[sqlx::test]
     async fn test_create_asset(db: sqlx::PgPool) {

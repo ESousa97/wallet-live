@@ -1,11 +1,13 @@
 use rust_decimal::Decimal;
 use serde::Serialize;
 use time::OffsetDateTime;
+use utoipa::ToSchema;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct Asset {
     pub id: i64,
     pub name: String,
+    /// Preço unitário atual, decimal exato serializado como string.
     pub unit_value: Decimal,
 }
 
