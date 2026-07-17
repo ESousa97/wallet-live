@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::get;
+use rand::RngCore;
 use sqlx::PgPool;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{Instrument, info};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -96,11 +97,15 @@ impl App {
                 state.clone(),
                 crate::auth::session::refresh_session,
             ))
-            // Cabeçalhos de segurança em TODA resposta (camada mais externa).
+            // Cabeçalhos de segurança em TODA resposta.
             .layer(axum::middleware::from_fn_with_state(
                 state,
                 security_headers,
-            ));
+            ))
+            // Camada MAIS externa: abre o span da requisição (com request_id)
+            // antes de tudo — assim até os logs dos middlewares internos saem
+            // correlacionados ao mesmo id.
+            .layer(axum::middleware::from_fn(request_tracing));
 
         // `with_graceful_shutdown` deixa as requisições em voo terminarem quando
         // chega um Ctrl+C, em vez de cortar conexões no meio.
@@ -113,13 +118,83 @@ impl App {
 }
 
 /// Subscriber de tracing escrevendo no terminal, com nível controlável via
-/// `RUST_LOG` (ex.: `RUST_LOG=wallet=debug`). Sem a variável, usa `info`.
+/// `RUST_LOG` (ex.: `RUST_LOG=wallet=debug`; padrão `info`) e formato via
+/// `LOG_FORMAT`: `json` emite uma linha JSON por evento (para agregadores como
+/// CloudWatch/Loki); qualquer outro valor usa o formato legível de terminal.
+///
+/// `LOG_FORMAT` é lido aqui (e não na `Config`) de propósito: o logging precisa
+/// existir ANTES de a configuração ser validada, para que os próprios erros de
+/// configuração já saiam no formato certo.
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let registry = tracing_subscriber::registry().with(filter);
+
+    let json = std::env::var("LOG_FORMAT").is_ok_and(|value| value.eq_ignore_ascii_case("json"));
+    if json {
+        registry
+            .with(tracing_subscriber::fmt::layer().json())
+            .init();
+    } else {
+        registry.with(tracing_subscriber::fmt::layer()).init();
+    }
+}
+
+/// Header padrão de correlação de requisições.
+const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
+
+/// Envolve cada requisição num span com `request_id`, método e caminho, e loga
+/// a conclusão com status e latência. O id vem do header `x-request-id` quando
+/// um proxy/gateway já o gerou (propagação), senão é gerado aqui; em ambos os
+/// casos ele volta na resposta — o cliente pode citá-lo num reporte de erro e o
+/// log correspondente é encontrado na hora.
+async fn request_tracing(request: Request, next: Next) -> Response {
+    let request_id = request
+        .headers()
+        .get(&REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        // Só aceitamos ids bem-comportados de fora: limita tamanho e alfabeto
+        // para um header malicioso não injetar lixo nos logs.
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        .map(str::to_owned)
+        .unwrap_or_else(new_request_id);
+
+    let span = tracing::info_span!(
+        "request",
+        %request_id,
+        method = %request.method(),
+        path = %request.uri().path()
+    );
+
+    let start = std::time::Instant::now();
+    let mut response = next.run(request).instrument(span.clone()).await;
+
+    span.in_scope(|| {
+        info!(
+            status = response.status().as_u16(),
+            latency_ms = start.elapsed().as_millis() as u64,
+            "request completed"
+        );
+    });
+
+    if let Ok(value) = HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert(REQUEST_ID_HEADER, value);
+    }
+
+    response
+}
+
+/// 8 bytes aleatórios em hexa — curto o bastante para logs, único o bastante
+/// para correlação.
+fn new_request_id() -> String {
+    let mut bytes = [0u8; 8];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Cabeçalhos de segurança aplicados a toda resposta:
