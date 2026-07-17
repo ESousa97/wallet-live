@@ -14,6 +14,7 @@
             {% endif %}
 
             <form method="post" action="{% if is_register %}/register{% else %}/login{% endif %}" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <div>
                     <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">usuário</label>
                     <input

@@ -9,11 +9,23 @@ pub struct Asset {
     pub unit_value: Decimal,
 }
 
+/// Papel de admin em `users.role` (o padrão do banco é `'user'`).
+pub const ROLE_ADMIN: &str = "admin";
+
+/// Identidade mínima de um usuário (sem hash de senha nem saldo). É o que a
+/// rotação de sessão devolve para reconstruir o `User` autenticado.
+pub struct UserIdentity {
+    pub id: i64,
+    pub username: String,
+    pub role: String,
+}
+
 pub struct UserRecord {
     pub id: i64,
     pub username: String,
     pub password_hash: String,
     pub balance: Decimal,
+    pub role: String,
 }
 
 pub struct WalletSummary {

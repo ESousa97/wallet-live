@@ -1,14 +1,18 @@
 use askama::Template;
 use axum::Router;
-use axum::extract::{Form, State};
+use axum::extract::{Form, Query, State};
 use axum::response::{Html, Redirect};
 use axum::routing::get;
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use axum_extra::extract::cookie::{Cookie, CookieJar};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::instrument;
 
 use crate::app::AppState;
+use crate::auth::csrf::{ensure_csrf_token, verify_csrf};
+use crate::auth::session::{
+    REFRESH_COOKIE, RefreshToken, access_cookie, hash_token, refresh_cookie, session_expiry,
+};
 use crate::auth::user::{TOKEN_COOKIE, UnauthenticatedUser, User};
 use crate::config::Config;
 use crate::error::AppError;
@@ -33,22 +37,42 @@ pub fn router() -> Router<AppState> {
 #[template(path = "login.html")]
 struct LoginPage {
     is_register: bool,
+    csrf_token: String,
+}
+
+/// Toda página com formulário garante um token CSRF na jar e o embute num campo
+/// oculto; os POSTs correspondentes conferem os dois (ver `auth::csrf`).
+#[instrument(skip_all)]
+async fn login_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
+    let page = LoginPage {
+        is_register: false,
+        csrf_token,
+    };
+    Ok((jar, Html(page.render()?)))
 }
 
 #[instrument(skip_all)]
-async fn login_page() -> Result<Html<String>, AppError> {
-    Ok(Html(LoginPage { is_register: false }.render()?))
-}
-
-#[instrument(skip_all)]
-async fn register_page() -> Result<Html<String>, AppError> {
-    Ok(Html(LoginPage { is_register: true }.render()?))
+async fn register_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
+    let page = LoginPage {
+        is_register: true,
+        csrf_token,
+    };
+    Ok((jar, Html(page.render()?)))
 }
 
 #[derive(Deserialize)]
 struct LoginForm {
     username: String,
     password: String,
+    csrf_token: String,
 }
 
 #[instrument(skip_all)]
@@ -58,14 +82,31 @@ async fn login(
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
-    let user = UnauthenticatedUser::new(form.username, form.password)
-        .authenticate(&repository)
-        .await?;
+    verify_csrf(&jar, &form.csrf_token)?;
 
-    Ok((
-        jar.add(session_cookie(&user, &state.config)?),
-        Redirect::to("/"),
-    ))
+    // Lockout ANTES de conferir a senha: durante o bloqueio nem a senha certa
+    // passa, então força bruta não extrai sinal nenhum das tentativas.
+    state.login_throttle.ensure_allowed(&form.username).await?;
+
+    let user = match UnauthenticatedUser::new(form.username.clone(), form.password)
+        .authenticate(&repository)
+        .await
+    {
+        Ok(user) => {
+            state.login_throttle.record_success(&form.username).await;
+            user
+        }
+        // Só falhas de credencial alimentam o contador — sondagem de username
+        // (404) e senha errada (401) contam igual; erro de banco não.
+        Err(error @ (AppError::InvalidCredentials | AppError::UserDoesNotExist)) => {
+            state.login_throttle.record_failure(&form.username).await;
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    };
+
+    let jar = start_session(jar, &user, &repository, &state.config).await?;
+    Ok((jar, Redirect::to("/")))
 }
 
 #[instrument(skip_all)]
@@ -75,20 +116,50 @@ async fn register(
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
+    verify_csrf(&jar, &form.csrf_token)?;
+
     let user = UnauthenticatedUser::new(form.username, form.password)
         .register(&repository)
         .await?;
 
-    Ok((
-        jar.add(session_cookie(&user, &state.config)?),
-        Redirect::to("/"),
-    ))
+    let jar = start_session(jar, &user, &repository, &state.config).await?;
+    Ok((jar, Redirect::to("/")))
 }
 
+/// Emite o par de cookies da sessão: o JWT de acesso (curto) e o refresh token
+/// (longo), cujo registro vai para a tabela `sessions` — é ele que permite
+/// renovar o acesso sem novo login e revogar a sessão no logout.
+async fn start_session(
+    jar: CookieJar,
+    user: &User,
+    repository: &Repository,
+    config: &Config,
+) -> Result<CookieJar, AppError> {
+    let refresh = RefreshToken::generate();
+    repository
+        .create_session(user.id(), &refresh.hash(), session_expiry(config))
+        .await?;
+
+    Ok(jar
+        .add(access_cookie(user, config)?)
+        .add(refresh_cookie(&refresh, config)))
+}
+
+/// Logout com revogação REAL: além de remover os cookies do navegador, mata a
+/// sessão no servidor — o refresh token para de funcionar em qualquer cópia.
 #[instrument(skip_all)]
-async fn logout(jar: CookieJar) -> (CookieJar, Redirect) {
+async fn logout(repository: Repository, jar: CookieJar) -> (CookieJar, Redirect) {
+    if let Some(refresh) = jar.get(REFRESH_COOKIE) {
+        // Falha ao revogar (banco fora etc.) não impede o logout local; a
+        // sessão ainda expira sozinha pelo expires_at.
+        let _ = repository
+            .revoke_session(&hash_token(refresh.value()))
+            .await;
+    }
+
     (
-        jar.remove(Cookie::build(TOKEN_COOKIE).path("/").build()),
+        jar.remove(Cookie::build(TOKEN_COOKIE).path("/").build())
+            .remove(Cookie::build(REFRESH_COOKIE).path("/").build()),
         Redirect::to("/login"),
     )
 }
@@ -110,6 +181,10 @@ struct AssetsPage {
     summary: WalletSummary,
     user: User,
     action: WalletAction,
+    csrf_token: String,
+    page: u32,
+    has_prev: bool,
+    has_next: bool,
 }
 
 enum WalletAction {
@@ -119,62 +194,111 @@ enum WalletAction {
     Sell,
 }
 
-#[instrument(skip_all)]
-async fn assets_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
-    render_wallet(user, repository, WalletAction::None).await
+/// Transações por página do extrato.
+const TRANSACTIONS_PAGE_SIZE: i64 = 25;
+
+#[derive(Deserialize)]
+struct PageQuery {
+    page: Option<u32>,
 }
 
 #[instrument(skip_all)]
-async fn deposit_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
-    render_wallet(user, repository, WalletAction::Deposit).await
+async fn assets_page(
+    State(state): State<AppState>,
+    user: User,
+    repository: Repository,
+    jar: CookieJar,
+    Query(query): Query<PageQuery>,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    render_wallet(state, user, repository, jar, WalletAction::None, &query).await
 }
 
 #[instrument(skip_all)]
-async fn buy_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
-    render_wallet(user, repository, WalletAction::Buy).await
+async fn deposit_page(
+    State(state): State<AppState>,
+    user: User,
+    repository: Repository,
+    jar: CookieJar,
+    Query(query): Query<PageQuery>,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    render_wallet(state, user, repository, jar, WalletAction::Deposit, &query).await
 }
 
 #[instrument(skip_all)]
-async fn sell_page(user: User, repository: Repository) -> Result<Html<String>, AppError> {
-    render_wallet(user, repository, WalletAction::Sell).await
+async fn buy_page(
+    State(state): State<AppState>,
+    user: User,
+    repository: Repository,
+    jar: CookieJar,
+    Query(query): Query<PageQuery>,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    render_wallet(state, user, repository, jar, WalletAction::Buy, &query).await
+}
+
+#[instrument(skip_all)]
+async fn sell_page(
+    State(state): State<AppState>,
+    user: User,
+    repository: Repository,
+    jar: CookieJar,
+    Query(query): Query<PageQuery>,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    render_wallet(state, user, repository, jar, WalletAction::Sell, &query).await
 }
 
 async fn render_wallet(
+    state: AppState,
     user: User,
     repository: Repository,
+    jar: CookieJar,
     action: WalletAction,
-) -> Result<Html<String>, AppError> {
-    let (summary, holdings, available_assets, transactions) = tokio::try_join!(
+    query: &PageQuery,
+) -> Result<(CookieJar, Html<String>), AppError> {
+    let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
+
+    // Página 1-based; qualquer valor inválido cai na primeira.
+    let page = query.page.unwrap_or(1).max(1);
+    let offset = i64::from(page - 1) * TRANSACTIONS_PAGE_SIZE;
+
+    let (summary, holdings, available_assets, transactions, total_transactions) = tokio::try_join!(
         repository.wallet_summary(user.id()),
         repository.list_holdings(user.id()),
         repository.list_assets(),
-        repository.list_transactions(user.id())
+        repository.list_transactions(user.id(), TRANSACTIONS_PAGE_SIZE, offset),
+        repository.count_transactions(user.id())
     )?;
 
-    Ok(Html(
-        AssetsPage {
-            holdings,
-            available_assets,
-            transactions,
-            summary,
-            user,
-            action,
-        }
-        .render()?,
-    ))
+    let has_next = (offset + transactions.len() as i64) < total_transactions;
+
+    let page = AssetsPage {
+        holdings,
+        available_assets,
+        transactions,
+        summary,
+        user,
+        action,
+        csrf_token,
+        page,
+        has_prev: page > 1,
+        has_next,
+    };
+    Ok((jar, Html(page.render()?)))
 }
 
 #[derive(Deserialize)]
 struct AmountForm {
     amount: Decimal,
+    csrf_token: String,
 }
 
 #[instrument(skip_all)]
 async fn deposit(
     user: User,
     repository: Repository,
+    jar: CookieJar,
     Form(form): Form<AmountForm>,
 ) -> Result<Redirect, AppError> {
+    verify_csrf(&jar, &form.csrf_token)?;
     repository.deposit(user.id(), form.amount).await?;
     Ok(Redirect::to("/assets"))
 }
@@ -183,14 +307,17 @@ async fn deposit(
 struct TradeAssetForm {
     asset_id: i64,
     quantity: Decimal,
+    csrf_token: String,
 }
 
 #[instrument(skip_all)]
 async fn buy_asset(
     user: User,
     repository: Repository,
+    jar: CookieJar,
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Redirect, AppError> {
+    verify_csrf(&jar, &form.csrf_token)?;
     repository
         .buy_asset(user.id(), form.asset_id, form.quantity)
         .await?;
@@ -201,29 +328,33 @@ async fn buy_asset(
 async fn sell_asset(
     user: User,
     repository: Repository,
+    jar: CookieJar,
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Redirect, AppError> {
+    verify_csrf(&jar, &form.csrf_token)?;
     repository
         .sell_asset(user.id(), form.asset_id, form.quantity)
         .await?;
     Ok(Redirect::to("/assets"))
 }
 
-#[instrument(skip_all)]
-async fn sync_quotes(_user: User, repository: Repository) -> Result<Redirect, AppError> {
-    sync_market_quotes(&repository).await?;
-    Ok(Redirect::to("/assets"))
+/// O formulário de sincronizar cotações não tem campo de dado nenhum, mas ainda
+/// é um POST que muda estado — então também carrega (e valida) o token CSRF.
+#[derive(Deserialize)]
+struct SyncQuotesForm {
+    csrf_token: String,
 }
 
-fn session_cookie(user: &User, config: &Config) -> Result<Cookie<'static>, AppError> {
-    Ok(
-        Cookie::build((TOKEN_COOKIE, user.auth_token(&config.jwt_secret)?))
-            .http_only(true)
-            .same_site(SameSite::Strict)
-            .secure(config.cookie_secure)
-            .path("/")
-            .build(),
-    )
+#[instrument(skip_all)]
+async fn sync_quotes(
+    _user: User,
+    repository: Repository,
+    jar: CookieJar,
+    Form(form): Form<SyncQuotesForm>,
+) -> Result<Redirect, AppError> {
+    verify_csrf(&jar, &form.csrf_token)?;
+    sync_market_quotes(&repository).await?;
+    Ok(Redirect::to("/assets"))
 }
 
 pub mod filters {

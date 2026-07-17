@@ -8,10 +8,20 @@ use sqlx::{PgPool, Postgres, Transaction as SqlxTransaction};
 
 use crate::app::AppState;
 use crate::error::AppError;
-use crate::models::{Asset, Holding, Transaction, UserRecord, WalletSummary};
+use crate::models::{Asset, Holding, Transaction, UserIdentity, UserRecord, WalletSummary};
 
 pub struct Repository {
     db: PgPool,
+}
+
+impl Repository {
+    /// Constrói um repository fora do fluxo de extração (ex.: em middlewares,
+    /// que recebem o estado mas não passam pela injeção de dependência).
+    pub fn from_state(state: &AppState) -> Self {
+        Self {
+            db: state.db.clone(),
+        }
+    }
 }
 
 impl FromRequestParts<AppState> for Repository {
@@ -34,15 +44,18 @@ impl Repository {
             .await
     }
 
-    pub async fn create_asset(&self, name: String, unit_value: Decimal) -> sqlx::Result<Asset> {
-        sqlx::query_as!(
+    pub async fn create_asset(&self, name: String, unit_value: Decimal) -> Result<Asset, AppError> {
+        let name = validated_asset_name(name)?;
+        let unit_value = validated_unit_value(unit_value)?;
+
+        Ok(sqlx::query_as!(
             Asset,
             "INSERT INTO assets (name, unit_value) VALUES ($1, $2) RETURNING id, name, unit_value",
             name,
             unit_value
         )
         .fetch_one(&self.db)
-        .await
+        .await?)
     }
 
     pub async fn update_asset(
@@ -50,8 +63,11 @@ impl Repository {
         asset_id: i64,
         name: Option<String>,
         unit_value: Option<Decimal>,
-    ) -> sqlx::Result<Option<Asset>> {
-        sqlx::query_as!(
+    ) -> Result<Option<Asset>, AppError> {
+        let name = name.map(validated_asset_name).transpose()?;
+        let unit_value = unit_value.map(validated_unit_value).transpose()?;
+
+        Ok(sqlx::query_as!(
             Asset,
             "UPDATE assets SET name = COALESCE($2, name), unit_value = COALESCE($3, unit_value) WHERE id = $1 RETURNING id, name, unit_value",
             asset_id,
@@ -59,7 +75,7 @@ impl Repository {
             unit_value
         )
         .fetch_optional(&self.db)
-        .await
+        .await?)
     }
 
     /// Aplica novos preços a ativos identificados pelo nome (normalizado para
@@ -101,7 +117,7 @@ impl Repository {
     ) -> sqlx::Result<UserRecord> {
         sqlx::query_as!(
             UserRecord,
-            "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash, balance",
+            "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash, balance, role",
             username,
             password_hash
         )
@@ -112,11 +128,100 @@ impl Repository {
     pub async fn get_user_by_name(&self, username: &str) -> sqlx::Result<Option<UserRecord>> {
         sqlx::query_as!(
             UserRecord,
-            "SELECT id, username, password_hash, balance FROM users WHERE username = $1",
+            "SELECT id, username, password_hash, balance, role FROM users WHERE username = $1",
             username
         )
         .fetch_optional(&self.db)
         .await
+    }
+
+    /// Promove/rebaixa um usuário. O CHECK do banco limita os papéis válidos
+    /// ('user'/'admin'); violá-lo vira erro de banco.
+    pub async fn set_user_role(&self, user_id: i64, role: &str) -> sqlx::Result<()> {
+        sqlx::query!("UPDATE users SET role = $2 WHERE id = $1", user_id, role)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Abre uma sessão de refresh para o usuário: guarda a HASH do token (nunca
+    /// o valor) com a expiração dada.
+    pub async fn create_session(
+        &self,
+        user_id: i64,
+        token_hash: &[u8],
+        expires_at: time::OffsetDateTime,
+    ) -> sqlx::Result<()> {
+        sqlx::query!(
+            "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+            user_id,
+            token_hash,
+            expires_at
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Rotaciona uma sessão: revoga atomicamente a sessão antiga (só se ainda
+    /// viva e não expirada) e abre uma nova com o novo token. O `UPDATE ...
+    /// RETURNING` é a peça-chave — ele "reivindica" a sessão numa operação só,
+    /// então um token roubado e o legítimo não conseguem ambos rotacionar: o
+    /// segundo a chegar encontra a sessão já revogada e recebe `None`.
+    pub async fn rotate_session(
+        &self,
+        old_hash: &[u8],
+        new_hash: &[u8],
+        expires_at: time::OffsetDateTime,
+    ) -> Result<Option<UserIdentity>, AppError> {
+        let mut tx = self.db.begin().await?;
+
+        let Some(claimed) = sqlx::query!(
+            r#"
+            UPDATE sessions
+            SET revoked_at = NOW()
+            WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()
+            RETURNING user_id
+            "#,
+            old_hash
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        sqlx::query!(
+            "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+            claimed.user_id,
+            new_hash,
+            expires_at
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        let identity = sqlx::query_as!(
+            UserIdentity,
+            "SELECT id, username, role FROM users WHERE id = $1",
+            claimed.user_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(Some(identity))
+    }
+
+    /// Revoga uma sessão (logout real): o refresh token deixa de funcionar no
+    /// servidor, não importa quantas cópias existam por aí.
+    pub async fn revoke_session(&self, token_hash: &[u8]) -> sqlx::Result<()> {
+        sqlx::query!(
+            "UPDATE sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
+            token_hash
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
     }
 
     pub async fn wallet_summary(&self, user_id: i64) -> sqlx::Result<WalletSummary> {
@@ -165,7 +270,15 @@ impl Repository {
         .await
     }
 
-    pub async fn list_transactions(&self, user_id: i64) -> sqlx::Result<Vec<Transaction>> {
+    /// Página do extrato, da transação mais recente para a mais antiga. O
+    /// desempate por `id` torna a ordem determinística mesmo com timestamps
+    /// idênticos — sem ele, itens poderiam repetir/sumir entre páginas.
+    pub async fn list_transactions(
+        &self,
+        user_id: i64,
+        limit: i64,
+        offset: i64,
+    ) -> sqlx::Result<Vec<Transaction>> {
         sqlx::query_as!(
             Transaction,
             r#"
@@ -181,11 +294,23 @@ impl Repository {
             LEFT JOIN assets a ON a.id = t.asset_id
             WHERE t.user_id = $1
             ORDER BY t.created_at DESC, t.id DESC
-            LIMIT 25
+            LIMIT $2 OFFSET $3
             "#,
-            user_id
+            user_id,
+            limit,
+            offset
         )
         .fetch_all(&self.db)
+        .await
+    }
+
+    /// Total de transações do usuário — insumo do "tem próxima página?".
+    pub async fn count_transactions(&self, user_id: i64) -> sqlx::Result<i64> {
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "count!" FROM transactions WHERE user_id = $1"#,
+            user_id
+        )
+        .fetch_one(&self.db)
         .await
     }
 
@@ -352,6 +477,27 @@ impl Repository {
     }
 }
 
+/// Normaliza e valida o nome de um ativo: sem espaços nas pontas e nunca vazio.
+/// Validar aqui (no repository, por onde toda escrita passa) garante que nenhum
+/// caminho — API do admin, seed, teste — grava um nome inválido.
+fn validated_asset_name(name: String) -> Result<String, AppError> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::InvalidAssetName);
+    }
+    Ok(name)
+}
+
+/// Um preço nunca pode ser negativo (zero é permitido: ativo ainda sem cotação).
+/// Preço negativo inverteria a matemática da carteira — uma "compra" creditaria
+/// saldo. O banco tem um CHECK equivalente como última linha de defesa.
+fn validated_unit_value(unit_value: Decimal) -> Result<Decimal, AppError> {
+    if unit_value < Decimal::ZERO {
+        return Err(AppError::NegativeUnitValue);
+    }
+    Ok(unit_value)
+}
+
 async fn asset_for_update(
     tx: &mut SqlxTransaction<'_, Postgres>,
     asset_id: i64,
@@ -407,10 +553,37 @@ mod tests {
         let summary = repo.wallet_summary(uid).await.expect("summary");
         assert_eq!(summary.balance, dec!(100));
 
-        let txs = repo.list_transactions(uid).await.expect("transactions");
+        let txs = repo
+            .list_transactions(uid, 25, 0)
+            .await
+            .expect("transactions");
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].kind, "deposit");
         assert_eq!(txs[0].cash_delta, dec!(100));
+    }
+
+    #[sqlx::test]
+    async fn transactions_paginate_newest_first_without_gaps(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        // Três depósitos com valores distintos para rastrear a ordem.
+        repo.deposit(uid, dec!(1)).await.unwrap();
+        repo.deposit(uid, dec!(2)).await.unwrap();
+        repo.deposit(uid, dec!(3)).await.unwrap();
+
+        assert_eq!(repo.count_transactions(uid).await.unwrap(), 3);
+
+        // Página 1 (2 itens): as duas mais recentes, na ordem 3 -> 2.
+        let first = repo.list_transactions(uid, 2, 0).await.unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0].cash_delta, dec!(3));
+        assert_eq!(first[1].cash_delta, dec!(2));
+
+        // Página 2: só a mais antiga, sem repetir nem pular nenhuma.
+        let second = repo.list_transactions(uid, 2, 2).await.unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].cash_delta, dec!(1));
     }
 
     #[sqlx::test]
@@ -544,6 +717,158 @@ mod tests {
             repo.sell_asset(uid, other, dec!(1)).await,
             Err(AppError::InsufficientHoldings)
         ));
+    }
+
+    #[sqlx::test]
+    async fn users_default_to_the_user_role_and_can_be_promoted(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        let record = repo.get_user_by_name("alice").await.unwrap().unwrap();
+        assert_eq!(record.role, "user");
+
+        repo.set_user_role(uid, "admin").await.expect("promote");
+        let record = repo.get_user_by_name("alice").await.unwrap().unwrap();
+        assert_eq!(record.role, "admin");
+
+        // Papel fora do CHECK ('user'/'admin') é rejeitado pelo banco.
+        assert!(repo.set_user_role(uid, "root").await.is_err());
+    }
+
+    fn future_expiry() -> time::OffsetDateTime {
+        time::OffsetDateTime::now_utc() + time::Duration::days(14)
+    }
+
+    #[sqlx::test]
+    async fn session_rotation_returns_the_user_and_burns_the_old_token(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        repo.create_session(uid, b"old-hash", future_expiry())
+            .await
+            .expect("create session");
+
+        // Primeira rotação: reivindica a sessão antiga e devolve a identidade.
+        let identity = repo
+            .rotate_session(b"old-hash", b"new-hash", future_expiry())
+            .await
+            .expect("rotate")
+            .expect("session is live");
+        assert_eq!(identity.id, uid);
+        assert_eq!(identity.username, "alice");
+
+        // Replay do token antigo: já foi queimado na rotação, não funciona mais.
+        assert!(
+            repo.rotate_session(b"old-hash", b"another", future_expiry())
+                .await
+                .expect("rotate")
+                .is_none()
+        );
+
+        // O token novo emitido pela rotação está válido.
+        assert!(
+            repo.rotate_session(b"new-hash", b"newer", future_expiry())
+                .await
+                .expect("rotate")
+                .is_some()
+        );
+    }
+
+    #[sqlx::test]
+    async fn revoked_session_cannot_rotate(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        repo.create_session(uid, b"hash", future_expiry())
+            .await
+            .unwrap();
+        repo.revoke_session(b"hash").await.expect("revoke");
+
+        assert!(
+            repo.rotate_session(b"hash", b"new", future_expiry())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn expired_session_cannot_rotate(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        // Sessão que já nasceu expirada (expiry no passado).
+        let past = time::OffsetDateTime::now_utc() - time::Duration::hours(1);
+        repo.create_session(uid, b"hash", past).await.unwrap();
+
+        assert!(
+            repo.rotate_session(b"hash", b"new", future_expiry())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn unknown_token_cannot_rotate(db: PgPool) {
+        let repo = Repository::from(db);
+
+        assert!(
+            repo.rotate_session(b"never-seen", b"new", future_expiry())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn asset_creation_rejects_invalid_input(db: PgPool) {
+        let repo = Repository::from(db);
+
+        // Nome vazio (ou só espaços) é rejeitado antes de tocar o banco.
+        assert!(matches!(
+            repo.create_asset("   ".to_string(), dec!(1)).await,
+            Err(AppError::InvalidAssetName)
+        ));
+        // Preço negativo inverteria a matemática da carteira.
+        assert!(matches!(
+            repo.create_asset("bitcoin".to_string(), dec!(-1)).await,
+            Err(AppError::NegativeUnitValue)
+        ));
+
+        assert!(repo.list_assets().await.unwrap().is_empty());
+    }
+
+    #[sqlx::test]
+    async fn asset_update_rejects_invalid_input(db: PgPool) {
+        let repo = Repository::from(db);
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+
+        assert!(matches!(
+            repo.update_asset(aid, Some("  ".to_string()), None).await,
+            Err(AppError::InvalidAssetName)
+        ));
+        assert!(matches!(
+            repo.update_asset(aid, None, Some(dec!(-3))).await,
+            Err(AppError::NegativeUnitValue)
+        ));
+
+        // O ativo permanece intocado após as tentativas inválidas.
+        let assets = repo.list_assets().await.unwrap();
+        assert_eq!(assets[0].name, "bitcoin");
+        assert_eq!(assets[0].unit_value, dec!(10));
+    }
+
+    #[sqlx::test]
+    async fn asset_name_is_trimmed_on_write(db: PgPool) {
+        let repo = Repository::from(db);
+
+        let asset = repo
+            .create_asset("  bitcoin  ".to_string(), dec!(10))
+            .await
+            .expect("create asset");
+
+        assert_eq!(asset.name, "bitcoin");
     }
 
     #[sqlx::test]

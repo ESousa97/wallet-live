@@ -22,6 +22,11 @@ pub struct Config {
     pub jwt_secret: String,
     pub cookie_secure: bool,
     pub bind_addr: SocketAddr,
+    /// Validade do token de ACESSO (JWT), em minutos. Curto de propósito: quem
+    /// mantém a sessão viva é o refresh token.
+    pub session_ttl_minutes: u64,
+    /// Validade do REFRESH token (e da linha em `sessions`), em dias.
+    pub refresh_ttl_days: u64,
 }
 
 impl Config {
@@ -41,7 +46,23 @@ impl Config {
                 .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
                 .parse()
                 .wrap_err("BIND_ADDR não é um endereço de socket válido (ex.: 0.0.0.0:3000)")?,
+            session_ttl_minutes: optional_positive("SESSION_TTL_MINUTES", 10)?,
+            refresh_ttl_days: optional_positive("REFRESH_TTL_DAYS", 14)?,
         })
+    }
+}
+
+/// Lê um inteiro positivo opcional do ambiente, com um padrão. Zero é rejeitado:
+/// um TTL de zero significaria sessões que já nascem expiradas.
+fn optional_positive(key: &str, default: u64) -> color_eyre::Result<u64> {
+    match std::env::var(key) {
+        Err(_) => Ok(default),
+        Ok(value) => match value.trim().parse::<u64>() {
+            Ok(parsed) if parsed > 0 => Ok(parsed),
+            _ => Err(eyre!(
+                "{key} deve ser um inteiro positivo (recebido: {value:?})"
+            )),
+        },
     }
 }
 

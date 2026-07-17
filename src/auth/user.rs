@@ -10,11 +10,8 @@ use crate::app::AppState;
 use crate::error::AppError;
 use crate::repository::Repository;
 
-/// Nome do cookie onde o token de sessão é guardado no navegador.
+/// Nome do cookie onde o token de acesso é guardado no navegador.
 pub const TOKEN_COOKIE: &str = "token";
-
-/// Por quanto tempo o JWT de sessão é válido (em minutos).
-const SESSION_MINUTES: u64 = 10;
 
 /// Dados que embutimos no JWT (as "claims" customizadas). Vira JSON, então
 /// precisa de Serialize/Deserialize. NÃO é criptografado — qualquer um lê o
@@ -23,6 +20,7 @@ const SESSION_MINUTES: u64 = 10;
 struct UserClaims {
     id: i64,
     username: String,
+    role: String,
 }
 
 /// Um usuário já autenticado no sistema. Diferente do `Admin`, ele carrega dados
@@ -30,14 +28,18 @@ struct UserClaims {
 /// são privados de propósito: a única forma de obter um `User` é passando por um
 /// dos fluxos de autenticação abaixo, então um `User` em mãos é prova de que o
 /// fluxo foi cumprido. Não guardamos a senha nem a hash: já foi autenticado.
+#[derive(Clone)]
 pub struct User {
     id: i64,
     username: String,
+    role: String,
 }
 
 impl User {
-    fn new(id: i64, username: String) -> Self {
-        Self { id, username }
+    /// Visível só dentro da crate: além dos fluxos de senha abaixo, o módulo de
+    /// sessão reconstrói um `User` ao rotacionar um refresh token válido.
+    pub(crate) fn new(id: i64, username: String, role: String) -> Self {
+        Self { id, username, role }
     }
 
     pub const fn id(&self) -> i64 {
@@ -48,17 +50,25 @@ impl User {
         &self.username
     }
 
-    /// Gera o JWT de sessão deste usuário, assinado com `secret`. O token vale
-    /// `SESSION_MINUTES` minutos. A chave vem da `Config` (ver `config.rs`), não
-    /// mais do ambiente relido a cada chamada.
-    pub fn auth_token(&self, secret: &str) -> Result<String, AppError> {
+    /// O papel vem das claims do JWT — assinadas, então tão confiáveis quanto o
+    /// resto do token. Rebaixar um admin só surte efeito quando os tokens
+    /// vigentes expirarem (ou a sessão for revogada).
+    pub fn is_admin(&self) -> bool {
+        self.role == crate::models::ROLE_ADMIN
+    }
+
+    /// Gera o JWT de acesso deste usuário, assinado com `secret` e válido por
+    /// `ttl_minutes` (vem da `Config`; curto de propósito — a longevidade da
+    /// sessão é papel do refresh token, ver `auth::session`).
+    pub fn auth_token(&self, secret: &str, ttl_minutes: u64) -> Result<String, AppError> {
         let key = HS256Key::from_bytes(secret.as_bytes());
         let claims = Claims::with_custom_claims(
             UserClaims {
                 id: self.id,
                 username: self.username.clone(),
+                role: self.role.clone(),
             },
-            Duration::from_mins(SESSION_MINUTES),
+            Duration::from_mins(ttl_minutes),
         );
         let token = key.authenticate(claims)?;
         Ok(token)
@@ -67,10 +77,14 @@ impl User {
     /// Reconstrói um `User` a partir de um token. Usa a mesma chave para VALIDAR
     /// a assinatura: se o token foi fabricado/adulterado ou expirou, falha. Só
     /// depois dessa verificação confiamos no conteúdo das claims.
-    fn from_auth_token(token: &str, secret: &str) -> Result<Self, AppError> {
+    pub(crate) fn from_auth_token(token: &str, secret: &str) -> Result<Self, AppError> {
         let key = HS256Key::from_bytes(secret.as_bytes());
         let claims = key.verify_token::<UserClaims>(token, None)?;
-        Ok(Self::new(claims.custom.id, claims.custom.username))
+        Ok(Self::new(
+            claims.custom.id,
+            claims.custom.username,
+            claims.custom.role,
+        ))
     }
 }
 
@@ -84,6 +98,12 @@ impl FromRequestParts<AppState> for User {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        // O middleware de sessão pode já ter renovado o usuário nesta mesma
+        // requisição (access expirado + refresh válido): ele fica nas extensions.
+        if let Some(user) = parts.extensions.get::<User>() {
+            return Ok(user.clone());
+        }
+
         // A cookie jar é só uma leitura dos headers da requisição.
         let jar = CookieJar::from_headers(&parts.headers);
         let token = jar
@@ -137,7 +157,11 @@ impl UnauthenticatedUser {
         // Não sabemos (by design) como a hash é verificada — delegamos para a
         // biblioteca, que escolhe o algoritmo adequado.
         match password_auth::verify_password(&self.password, &user_record.password_hash) {
-            Ok(()) => Ok(User::new(user_record.id, user_record.username)),
+            Ok(()) => Ok(User::new(
+                user_record.id,
+                user_record.username,
+                user_record.role,
+            )),
             Err(VerifyError::PasswordInvalid) => Err(AppError::InvalidCredentials),
             // A hash guardada inclui o algoritmo usado; se ela não parseia, algo
             // muito errado aconteceu (usuário inserido por outra via). Melhor
@@ -154,7 +178,11 @@ impl UnauthenticatedUser {
         let password_hash = password_auth::generate_hash(&self.password);
 
         match repository.add_user(self.username, password_hash).await {
-            Ok(user_record) => Ok(User::new(user_record.id, user_record.username)),
+            Ok(user_record) => Ok(User::new(
+                user_record.id,
+                user_record.username,
+                user_record.role,
+            )),
             // O username é UNIQUE: violar a constraint vira um erro específico e
             // mais útil do que um 500 genérico de banco.
             Err(sqlx::Error::Database(db_error)) if db_error.is_unique_violation() => {

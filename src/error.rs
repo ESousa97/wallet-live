@@ -19,6 +19,14 @@ pub enum AppError {
     UsernameTaken,
     #[error("invalid amount")]
     InvalidAmount,
+    #[error("too many failed attempts, try again later")]
+    TooManyAttempts,
+    #[error("invalid csrf token")]
+    CsrfMismatch,
+    #[error("asset name must not be empty")]
+    InvalidAssetName,
+    #[error("unit value must not be negative")]
+    NegativeUnitValue,
     #[error("insufficient balance")]
     InsufficientBalance,
     #[error("insufficient holdings")]
@@ -67,6 +75,13 @@ impl IntoResponse for AppError {
             // O nome já está em uso: erro do cliente.
             AppError::UsernameTaken => StatusCode::BAD_REQUEST,
             AppError::InvalidAmount => StatusCode::BAD_REQUEST,
+            // Lockout de força bruta no login.
+            AppError::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
+            // Token CSRF ausente ou divergente: a requisição não veio de um
+            // formulário que nós renderizamos.
+            AppError::CsrfMismatch => StatusCode::FORBIDDEN,
+            AppError::InvalidAssetName => StatusCode::BAD_REQUEST,
+            AppError::NegativeUnitValue => StatusCode::BAD_REQUEST,
             AppError::InsufficientBalance => StatusCode::BAD_REQUEST,
             AppError::InsufficientHoldings => StatusCode::BAD_REQUEST,
             AppError::QuoteUnavailable => StatusCode::BAD_GATEWAY,
