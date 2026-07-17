@@ -6,6 +6,7 @@ pub mod models;
 mod quotes;
 pub mod repository;
 pub mod routes;
+pub mod services;
 
 // A main fica o mais enxuta possível: o tokio::main cria um runtime assíncrono
 // e tudo o que governa o serviço vive em `App::start`.

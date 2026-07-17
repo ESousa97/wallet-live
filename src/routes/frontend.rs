@@ -19,6 +19,7 @@ use crate::error::AppError;
 use crate::models::{Asset, Holding, Transaction, WalletSummary};
 use crate::quotes::sync_market_quotes;
 use crate::repository::Repository;
+use crate::services::portfolio::PortfolioService;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -194,9 +195,6 @@ enum WalletAction {
     Sell,
 }
 
-/// Transações por página do extrato.
-const TRANSACTIONS_PAGE_SIZE: i64 = 25;
-
 #[derive(Deserialize)]
 struct PageQuery {
     page: Option<u32>,
@@ -206,81 +204,73 @@ struct PageQuery {
 async fn assets_page(
     State(state): State<AppState>,
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, repository, jar, WalletAction::None, &query).await
+    render_wallet(state, user, portfolio, jar, WalletAction::None, &query).await
 }
 
 #[instrument(skip_all)]
 async fn deposit_page(
     State(state): State<AppState>,
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, repository, jar, WalletAction::Deposit, &query).await
+    render_wallet(state, user, portfolio, jar, WalletAction::Deposit, &query).await
 }
 
 #[instrument(skip_all)]
 async fn buy_page(
     State(state): State<AppState>,
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, repository, jar, WalletAction::Buy, &query).await
+    render_wallet(state, user, portfolio, jar, WalletAction::Buy, &query).await
 }
 
 #[instrument(skip_all)]
 async fn sell_page(
     State(state): State<AppState>,
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, repository, jar, WalletAction::Sell, &query).await
+    render_wallet(state, user, portfolio, jar, WalletAction::Sell, &query).await
 }
 
+/// O handler só faz HTTP: garante o token CSRF, pede a visão pronta ao serviço
+/// e renderiza o template. Toda a montagem (consultas, paginação) é do serviço.
 async fn render_wallet(
     state: AppState,
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     action: WalletAction,
     query: &PageQuery,
 ) -> Result<(CookieJar, Html<String>), AppError> {
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
 
-    // Página 1-based; qualquer valor inválido cai na primeira.
-    let page = query.page.unwrap_or(1).max(1);
-    let offset = i64::from(page - 1) * TRANSACTIONS_PAGE_SIZE;
-
-    let (summary, holdings, available_assets, transactions, total_transactions) = tokio::try_join!(
-        repository.wallet_summary(user.id()),
-        repository.list_holdings(user.id()),
-        repository.list_assets(),
-        repository.list_transactions(user.id(), TRANSACTIONS_PAGE_SIZE, offset),
-        repository.count_transactions(user.id())
-    )?;
-
-    let has_next = (offset + transactions.len() as i64) < total_transactions;
+    let view = portfolio
+        .wallet_view(user.id(), query.page.unwrap_or(1))
+        .await?;
 
     let page = AssetsPage {
-        holdings,
-        available_assets,
-        transactions,
-        summary,
+        holdings: view.holdings,
+        available_assets: view.available_assets,
+        transactions: view.transactions,
+        summary: view.summary,
         user,
         action,
         csrf_token,
-        page,
-        has_prev: page > 1,
-        has_next,
+        page: view.page,
+        has_prev: view.has_prev,
+        has_next: view.has_next,
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -294,12 +284,12 @@ struct AmountForm {
 #[instrument(skip_all)]
 async fn deposit(
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Form(form): Form<AmountForm>,
 ) -> Result<Redirect, AppError> {
     verify_csrf(&jar, &form.csrf_token)?;
-    repository.deposit(user.id(), form.amount).await?;
+    portfolio.deposit(user.id(), form.amount).await?;
     Ok(Redirect::to("/assets"))
 }
 
@@ -313,28 +303,24 @@ struct TradeAssetForm {
 #[instrument(skip_all)]
 async fn buy_asset(
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Redirect, AppError> {
     verify_csrf(&jar, &form.csrf_token)?;
-    repository
-        .buy_asset(user.id(), form.asset_id, form.quantity)
-        .await?;
+    portfolio.buy(user.id(), form.asset_id, form.quantity).await?;
     Ok(Redirect::to("/assets"))
 }
 
 #[instrument(skip_all)]
 async fn sell_asset(
     user: User,
-    repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Redirect, AppError> {
     verify_csrf(&jar, &form.csrf_token)?;
-    repository
-        .sell_asset(user.id(), form.asset_id, form.quantity)
-        .await?;
+    portfolio.sell(user.id(), form.asset_id, form.quantity).await?;
     Ok(Redirect::to("/assets"))
 }
 
