@@ -71,7 +71,12 @@ impl PortfolioService {
         self.repository.deposit(user_id, amount).await
     }
 
-    pub async fn buy(&self, user_id: i64, asset_id: i64, quantity: Decimal) -> Result<(), AppError> {
+    pub async fn buy(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError> {
         self.repository.buy_asset(user_id, asset_id, quantity).await
     }
 

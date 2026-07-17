@@ -52,11 +52,17 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   interface).
 - [x] Versionamento da API: caminho canônico `/api/v1` (com `/api` mantido como
   alias de compatibilidade).
-- [ ] Camada de serviço explícita (ex.: `PortfolioService`) separando regra de
-  negócio dos handlers HTTP.
+- [x] Camada de serviço explícita: `PortfolioService` orquestra a visão da
+  carteira (consultas concorrentes + paginação) e as operações; handlers só
+  fazem HTTP, o repository só fala SQL.
+- [x] Especificação OpenAPI gerada do código (utoipa), servida em
+  `/api/v1/openapi.json` — a documentação não descola da implementação.
+- [x] Avaliação de UUIDv7 como chave pública. **Decisão: manter `BIGSERIAL`.**
+  Os ids só aparecem em superfícies autenticadas (API administrativa e
+  formulários da própria sessão) e toda leitura é filtrada pelo usuário da
+  sessão — enumeração não expõe dados de terceiros. Reavaliar se a API se
+  tornar pública ou multi-tenant.
 - [ ] Abstração do repositório via trait, permitindo testes de serviço sem banco.
-- [ ] Especificação OpenAPI gerada do código.
-- [ ] Avaliação de UUIDv7 como chave pública dos recursos (evita enumeração).
 
 ## ⚙️ Fase 4 — Operação
 

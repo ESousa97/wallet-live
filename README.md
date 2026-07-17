@@ -56,8 +56,10 @@ src/
     session.rs       # refresh token (rotação/revogação) + middleware de renovação
     csrf.rs          # proteção CSRF (double-submit cookie)
     throttle.rs      # lockout progressivo de login
+  services/
+    portfolio.rs     # PortfolioService: visão da carteira + operações (regra de negócio)
   routes/
-    api.rs           # API REST administrativa (JSON) + testes de snapshot
+    api.rs           # API REST administrativa (JSON) + OpenAPI + testes de snapshot
     frontend.rs      # SSR: login/logout, carteira, operações, filtros Askama
 templates/           # base.html (esqueleto) + login.html + assets.html
 migrations/          # schema versionado, up/down reversíveis
@@ -90,6 +92,7 @@ serviço `Authorization: <ADMIN_SECRET_KEY>`.
 | `GET` | `/api/v1/assets` | — | Lista os ativos |
 | `POST` | `/api/v1/assets` | admin | Cadastra um ativo (`{name, unit_value}`) |
 | `PATCH` | `/api/v1/assets` | admin | Atualiza um ativo (`{id, name?, unit_value?}`) |
+| `GET` | `/api/v1/openapi.json` | — | Especificação OpenAPI gerada do código |
 
 Erros: `400` entrada inválida (header ausente, nome vazio, preço negativo,
 quantia não positiva, saldo/posição insuficiente, username em uso), `401`
@@ -172,8 +175,8 @@ observabilidade e novas funcionalidades — está em [ROADMAP.md](ROADMAP.md).
 
 **axum** (+ axum-extra), **tokio**, **sqlx** (Postgres, compile-time checked),
 **askama**, **rust_decimal**, **password-auth** (argon2), **jwt-simple**,
-**subtle**, **reqwest**, **tracing**, **thiserror**, **color-eyre**, **serde**.
-Em testes: **insta**.
+**subtle**, **reqwest**, **tracing**, **thiserror**, **color-eyre**, **serde**,
+**utoipa** (OpenAPI). Em testes: **insta**.
 
 ## Notas de ambiente (Windows)
 

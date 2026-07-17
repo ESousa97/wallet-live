@@ -308,7 +308,9 @@ async fn buy_asset(
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Redirect, AppError> {
     verify_csrf(&jar, &form.csrf_token)?;
-    portfolio.buy(user.id(), form.asset_id, form.quantity).await?;
+    portfolio
+        .buy(user.id(), form.asset_id, form.quantity)
+        .await?;
     Ok(Redirect::to("/assets"))
 }
 
@@ -320,7 +322,9 @@ async fn sell_asset(
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Redirect, AppError> {
     verify_csrf(&jar, &form.csrf_token)?;
-    portfolio.sell(user.id(), form.asset_id, form.quantity).await?;
+    portfolio
+        .sell(user.id(), form.asset_id, form.quantity)
+        .await?;
     Ok(Redirect::to("/assets"))
 }
 
