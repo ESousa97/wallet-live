@@ -18,10 +18,10 @@ use crate::auth::user::{TOKEN_COOKIE, UnauthenticatedUser, User};
 use crate::config::Config;
 use crate::error::AppError;
 use crate::models::{Asset, Holding, Transaction, WalletSummary};
-use crate::quotes::sync_market_quotes;
+use crate::quotes::sync_quotes_round;
 use crate::repository::Repository;
 use crate::routes::flash::{Flash, business_flash, set_flash, take_flash};
-use crate::services::portfolio::PortfolioService;
+use crate::services::portfolio::{EquityChart, PortfolioService};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -317,6 +317,7 @@ struct AssetsPage {
     has_prev: bool,
     has_next: bool,
     flash: Option<Flash>,
+    chart: EquityChart,
 }
 
 enum WalletAction {
@@ -404,6 +405,7 @@ async fn render_wallet(
         has_prev: view.has_prev,
         has_next: view.has_next,
         flash,
+        chart: view.chart,
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -510,7 +512,7 @@ async fn sync_quotes(
 ) -> Result<(CookieJar, Redirect), AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
-        sync_market_quotes(&repository).await.map(|_| ())
+        sync_quotes_round(&repository).await.map(|_| ())
     }
     .await;
 

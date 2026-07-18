@@ -49,6 +49,12 @@ pub struct Holding {
     pub value_delta: Decimal,
 }
 
+/// Um ponto da série do patrimônio (usado pelo gráfico de evolução).
+pub struct PortfolioSnapshot {
+    pub total_value: Decimal,
+    pub captured_at: OffsetDateTime,
+}
+
 pub struct Transaction {
     pub id: i64,
     pub kind: String,

@@ -58,6 +58,20 @@
         </div>
     </section>
 
+    {% if chart.has_data() %}
+    <section class="mb-8 rounded-lg border border-neutral-800 bg-neutral-900/70 p-5">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-300">evolução do patrimônio</h2>
+        <svg viewBox="0 0 100 32" preserveAspectRatio="none" class="h-24 w-full" role="img" aria-label="gráfico da evolução do patrimônio ao longo das últimas atualizações de cotação">
+            <polyline points="{{ chart.points }}" fill="none" stroke="#34d399" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+        </svg>
+        <div class="mt-2 flex items-center justify-between text-xs tabular-nums text-neutral-500">
+            <span>mín {{ chart.min_value|money }}</span>
+            <span class="text-neutral-300">último {{ chart.latest_value|money }}</span>
+            <span>máx {{ chart.max_value|money }}</span>
+        </div>
+    </section>
+    {% endif %}
+
     {% match action %}
     {% when WalletAction::Deposit %}
     <section class="mb-8 rounded-lg border border-neutral-800 bg-neutral-900/70 p-5">

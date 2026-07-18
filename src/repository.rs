@@ -8,7 +8,9 @@ use sqlx::{PgPool, Postgres, Transaction as SqlxTransaction};
 
 use crate::app::AppState;
 use crate::error::AppError;
-use crate::models::{Asset, Holding, Transaction, UserIdentity, UserRecord, WalletSummary};
+use crate::models::{
+    Asset, Holding, PortfolioSnapshot, Transaction, UserIdentity, UserRecord, WalletSummary,
+};
 
 pub struct Repository {
     db: PgPool,
@@ -302,6 +304,52 @@ impl Repository {
         )
         .fetch_all(&self.db)
         .await
+    }
+
+    /// Fotografa o patrimônio de TODOS os usuários (caixa + posições a preço de
+    /// mercado) num único INSERT..SELECT. Chamado após cada rodada de cotações
+    /// — o momento em que os preços (e portanto o patrimônio) mudam.
+    pub async fn record_portfolio_snapshots(&self) -> sqlx::Result<u64> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO portfolio_snapshots (user_id, total_value)
+            SELECT u.id, u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0)
+            FROM users u
+            LEFT JOIN holdings h ON h.user_id = u.id
+            LEFT JOIN assets a ON a.id = h.asset_id
+            GROUP BY u.id, u.balance
+            "#
+        )
+        .execute(&self.db)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Últimos `limit` pontos da série do patrimônio de um usuário, do mais
+    /// antigo para o mais novo (a ordem que o gráfico desenha).
+    pub async fn list_portfolio_snapshots(
+        &self,
+        user_id: i64,
+        limit: i64,
+    ) -> sqlx::Result<Vec<PortfolioSnapshot>> {
+        let mut snapshots = sqlx::query_as!(
+            PortfolioSnapshot,
+            r#"
+            SELECT total_value, captured_at
+            FROM portfolio_snapshots
+            WHERE user_id = $1
+            ORDER BY captured_at DESC, id DESC
+            LIMIT $2
+            "#,
+            user_id,
+            limit
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        snapshots.reverse();
+        Ok(snapshots)
     }
 
     /// Extrato COMPLETO do usuário, sem paginação — alimenta a exportação CSV.
@@ -844,6 +892,36 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[sqlx::test]
+    async fn portfolio_snapshots_capture_cash_plus_holdings(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(10)).await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(3)).await.unwrap(); // caixa 70 + 3×10 = 100
+
+        let recorded = repo.record_portfolio_snapshots().await.expect("snapshot");
+        assert_eq!(recorded, 1); // um usuário, uma linha
+
+        // Preço dobra: o próximo snapshot captura o novo patrimônio.
+        repo.update_asset(aid, None, Some(dec!(20))).await.unwrap();
+        repo.record_portfolio_snapshots().await.unwrap();
+
+        let series = repo
+            .list_portfolio_snapshots(uid, 60)
+            .await
+            .expect("series");
+        assert_eq!(series.len(), 2);
+        // Ordem do gráfico: do mais antigo para o mais novo.
+        assert_eq!(series[0].total_value, dec!(100)); // 70 + 3×10
+        assert_eq!(series[1].total_value, dec!(130)); // 70 + 3×20
+
+        // O limite corta pelos MAIS RECENTES.
+        let last_only = repo.list_portfolio_snapshots(uid, 1).await.unwrap();
+        assert_eq!(last_only.len(), 1);
+        assert_eq!(last_only[0].total_value, dec!(130));
     }
 
     #[sqlx::test]

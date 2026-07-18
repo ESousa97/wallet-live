@@ -24,12 +24,21 @@ pub fn spawn_scheduled_sync(state: AppState) {
         loop {
             // O primeiro tick resolve na hora: o boot já sincroniza.
             interval.tick().await;
-            match sync_market_quotes(&repository).await {
+            match sync_quotes_round(&repository).await {
                 Ok(updated) => info!(assets_updated = updated, "scheduled quotes sync"),
                 Err(error) => warn!(?error, "scheduled quotes sync failed"),
             }
         }
     });
+}
+
+/// Uma rodada completa de cotações: atualiza os preços E fotografa o patrimônio
+/// de todos os usuários (a série do gráfico de evolução). Usada tanto pelo job
+/// agendado quanto pelo botão manual — os dois caminhos alimentam o histórico.
+pub async fn sync_quotes_round(repository: &Repository) -> Result<usize, AppError> {
+    let updated = sync_market_quotes(repository).await?;
+    repository.record_portfolio_snapshots().await?;
+    Ok(updated)
 }
 
 #[derive(Deserialize)]
