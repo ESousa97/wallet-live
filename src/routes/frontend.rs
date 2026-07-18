@@ -31,6 +31,7 @@ pub fn router() -> Router<AppState> {
         .route("/register", get(register_page).post(register))
         .route("/logout", get(logout))
         .route("/assets", get(assets_page))
+        .route("/transactions.csv", get(transactions_csv))
         .route("/deposit", get(deposit_page).post(deposit))
         .route("/buy", get(buy_page).post(buy_asset))
         .route("/sell", get(sell_page).post(sell_asset))
@@ -184,6 +185,76 @@ async fn register(
             ))
         }
     }
+}
+
+/// Exporta o extrato completo do usuário autenticado como download CSV.
+#[instrument(skip_all)]
+async fn transactions_csv(
+    user: User,
+    repository: Repository,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let transactions = repository.list_all_transactions(user.id()).await?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"extrato.csv\"",
+            ),
+        ],
+        transactions_to_csv(&transactions),
+    ))
+}
+
+/// Monta o CSV do extrato no padrão pt-BR de planilha: separador `;` e decimais
+/// com vírgula (é o que o Excel/LibreOffice em português esperam). Campos de
+/// texto vão entre aspas, com aspas internas dobradas (RFC 4180).
+fn transactions_to_csv(transactions: &[Transaction]) -> String {
+    let mut csv = String::from("data;tipo;ativo;quantidade;preco_unitario;movimento_caixa\n");
+
+    for tx in transactions {
+        let date = tx
+            .created_at
+            .format(
+                &time::format_description::parse("[year]-[month]-[day] [hour]:[minute]")
+                    .expect("static format"),
+            )
+            .unwrap_or_default();
+        let kind = match tx.kind.as_str() {
+            "deposit" => "deposito",
+            "buy" => "compra",
+            "sell" => "venda",
+            other => other,
+        };
+        let asset = tx.asset_name.as_deref().unwrap_or("-");
+        let quantity = tx
+            .quantity
+            .map(|q| decimal_ptbr(&q))
+            .unwrap_or_else(|| "-".to_string());
+        let unit_value = tx
+            .unit_value
+            .map(|v| decimal_ptbr(&v))
+            .unwrap_or_else(|| "-".to_string());
+
+        csv.push_str(&format!(
+            "{date};{kind};{};{quantity};{unit_value};{}\n",
+            csv_field(asset),
+            decimal_ptbr(&tx.cash_delta)
+        ));
+    }
+
+    csv
+}
+
+/// Decimal com vírgula, sem zeros supérfluos.
+fn decimal_ptbr(value: &Decimal) -> String {
+    value.normalize().to_string().replace('.', ",")
+}
+
+/// Campo de texto CSV: aspas em volta, aspas internas dobradas.
+fn csv_field(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
 }
 
 /// Emite o par de cookies da sessão: o JWT de acesso (curto) e o refresh token
@@ -449,6 +520,52 @@ async fn sync_quotes(
         Flash::success("cotações atualizadas."),
         &state,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+    use time::macros::datetime;
+
+    #[test]
+    fn csv_export_formats_the_statement_in_ptbr_conventions() {
+        let transactions = vec![
+            Transaction {
+                id: 2,
+                kind: "buy".to_string(),
+                asset_name: Some("bitcoin \"btc\"".to_string()),
+                quantity: Some(dec!(0.50)),
+                unit_value: Some(dec!(100.25)),
+                cash_delta: dec!(-50.125),
+                created_at: datetime!(2026-07-17 12:30 UTC),
+            },
+            Transaction {
+                id: 1,
+                kind: "deposit".to_string(),
+                asset_name: None,
+                quantity: None,
+                unit_value: None,
+                cash_delta: dec!(1000),
+                created_at: datetime!(2026-07-17 12:00 UTC),
+            },
+        ];
+
+        let csv = transactions_to_csv(&transactions);
+        let lines: Vec<&str> = csv.lines().collect();
+
+        assert_eq!(
+            lines[0],
+            "data;tipo;ativo;quantidade;preco_unitario;movimento_caixa"
+        );
+        // Decimais com vírgula, aspas internas dobradas, tipo em pt-BR.
+        assert_eq!(
+            lines[1],
+            "2026-07-17 12:30;compra;\"bitcoin \"\"btc\"\"\";0,5;100,25;-50,125"
+        );
+        // Depósito não tem ativo/quantidade/preço.
+        assert_eq!(lines[2], "2026-07-17 12:00;deposito;\"-\";-;-;1000");
+    }
 }
 
 pub mod filters {

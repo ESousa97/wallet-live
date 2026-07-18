@@ -304,6 +304,31 @@ impl Repository {
         .await
     }
 
+    /// Extrato COMPLETO do usuário, sem paginação — alimenta a exportação CSV.
+    /// Mesma ordenação estável do extrato paginado.
+    pub async fn list_all_transactions(&self, user_id: i64) -> sqlx::Result<Vec<Transaction>> {
+        sqlx::query_as!(
+            Transaction,
+            r#"
+            SELECT
+                t.id,
+                t.kind,
+                a.name AS "asset_name?",
+                t.quantity,
+                t.unit_value,
+                t.cash_delta,
+                t.created_at
+            FROM transactions t
+            LEFT JOIN assets a ON a.id = t.asset_id
+            WHERE t.user_id = $1
+            ORDER BY t.created_at DESC, t.id DESC
+            "#,
+            user_id
+        )
+        .fetch_all(&self.db)
+        .await
+    }
+
     /// Total de transações do usuário — insumo do "tem próxima página?".
     pub async fn count_transactions(&self, user_id: i64) -> sqlx::Result<i64> {
         sqlx::query_scalar!(
