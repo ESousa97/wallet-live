@@ -1,0 +1,12 @@
+# Configuração do cargo-audit (job `audit` do CI).
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — "Marvin Attack" no crate `rsa`, que entra
+    # transitivamente por jwt-simple -> superboring -> rsa e NÃO tem correção
+    # upstream disponível. Esta aplicação assina e valida JWTs exclusivamente
+    # com HS256 (HMAC simétrico): o código RSA nunca é exercitado, então o
+    # canal lateral não é alcançável aqui. Reavaliar quando houver fix
+    # upstream ou se algum algoritmo RSA passar a ser usado.
+    "RUSTSEC-2023-0071",
+]
