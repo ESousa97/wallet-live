@@ -13,6 +13,16 @@
             <p class="mb-6 text-sm text-neutral-400">entre para acessar saldo, posições e histórico.</p>
             {% endif %}
 
+            {% match flash %}
+            {% when Some with (flash) %}
+            {% if flash.is_error() %}
+            <div role="alert" class="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ flash.message }}</div>
+            {% else %}
+            <div role="status" class="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">{{ flash.message }}</div>
+            {% endif %}
+            {% when None %}
+            {% endmatch %}
+
             <form method="post" action="{% if is_register %}/register{% else %}/login{% endif %}" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <div>

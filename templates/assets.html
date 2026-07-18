@@ -21,6 +21,16 @@
         </div>
     </header>
 
+    {% match flash %}
+    {% when Some with (flash) %}
+    {% if flash.is_error() %}
+    <div role="alert" class="mb-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ flash.message }}</div>
+    {% else %}
+    <div role="status" class="mb-6 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">{{ flash.message }}</div>
+    {% endif %}
+    {% when None %}
+    {% endmatch %}
+
     <section class="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-neutral-800 bg-neutral-800 sm:grid-cols-5">
         <div class="bg-neutral-900/90 px-5 py-4">
             <p class="text-xs text-neutral-500">saldo</p>

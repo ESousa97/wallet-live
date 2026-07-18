@@ -20,6 +20,7 @@ use crate::error::AppError;
 use crate::models::{Asset, Holding, Transaction, WalletSummary};
 use crate::quotes::sync_market_quotes;
 use crate::repository::Repository;
+use crate::routes::flash::{Flash, business_flash, set_flash, take_flash};
 use crate::services::portfolio::PortfolioService;
 
 pub fn router() -> Router<AppState> {
@@ -57,19 +58,23 @@ async fn tailwind_js() -> impl axum::response::IntoResponse {
 struct LoginPage {
     is_register: bool,
     csrf_token: String,
+    flash: Option<Flash>,
 }
 
 /// Toda página com formulário garante um token CSRF na jar e o embute num campo
-/// oculto; os POSTs correspondentes conferem os dois (ver `auth::csrf`).
+/// oculto; os POSTs correspondentes conferem os dois (ver `auth::csrf`). O
+/// flash (se houver) é consumido aqui e vira o banner de feedback.
 #[instrument(skip_all)]
 async fn login_page(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<(CookieJar, Html<String>), AppError> {
+    let (jar, flash) = take_flash(jar);
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
     let page = LoginPage {
         is_register: false,
         csrf_token,
+        flash,
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -79,10 +84,12 @@ async fn register_page(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<(CookieJar, Html<String>), AppError> {
+    let (jar, flash) = take_flash(jar);
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
     let page = LoginPage {
         is_register: true,
         csrf_token,
+        flash,
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -101,31 +108,52 @@ async fn login(
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
-    verify_csrf(&jar, &form.csrf_token)?;
+    match authenticate_form(&state, &repository, &jar, form).await {
+        Ok(user) => {
+            let jar = start_session(jar, &user, &repository, &state.config).await?;
+            Ok((jar, Redirect::to("/")))
+        }
+        // Erro de negócio vira banner na própria tela de login; erro interno
+        // propaga (o `?` do business_flash) para o fluxo de 500.
+        Err(error) => {
+            let flash = business_flash(error)?;
+            Ok((
+                set_flash(jar, &flash, state.config.cookie_secure),
+                Redirect::to("/login"),
+            ))
+        }
+    }
+}
+
+/// O miolo do login: CSRF, lockout e conferência de credencial.
+async fn authenticate_form(
+    state: &AppState,
+    repository: &Repository,
+    jar: &CookieJar,
+    form: LoginForm,
+) -> Result<User, AppError> {
+    verify_csrf(jar, &form.csrf_token)?;
 
     // Lockout ANTES de conferir a senha: durante o bloqueio nem a senha certa
     // passa, então força bruta não extrai sinal nenhum das tentativas.
     state.login_throttle.ensure_allowed(&form.username).await?;
 
-    let user = match UnauthenticatedUser::new(form.username.clone(), form.password)
-        .authenticate(&repository)
+    match UnauthenticatedUser::new(form.username.clone(), form.password)
+        .authenticate(repository)
         .await
     {
         Ok(user) => {
             state.login_throttle.record_success(&form.username).await;
-            user
+            Ok(user)
         }
         // Só falhas de credencial alimentam o contador — sondagem de username
-        // (404) e senha errada (401) contam igual; erro de banco não.
+        // e senha errada contam igual; erro de banco não.
         Err(error @ (AppError::InvalidCredentials | AppError::UserDoesNotExist)) => {
             state.login_throttle.record_failure(&form.username).await;
-            return Err(error);
+            Err(error)
         }
-        Err(error) => return Err(error),
-    };
-
-    let jar = start_session(jar, &user, &repository, &state.config).await?;
-    Ok((jar, Redirect::to("/")))
+        Err(error) => Err(error),
+    }
 }
 
 #[instrument(skip_all)]
@@ -135,14 +163,27 @@ async fn register(
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
-    verify_csrf(&jar, &form.csrf_token)?;
+    let outcome = async {
+        verify_csrf(&jar, &form.csrf_token)?;
+        UnauthenticatedUser::new(form.username, form.password)
+            .register(&repository)
+            .await
+    }
+    .await;
 
-    let user = UnauthenticatedUser::new(form.username, form.password)
-        .register(&repository)
-        .await?;
-
-    let jar = start_session(jar, &user, &repository, &state.config).await?;
-    Ok((jar, Redirect::to("/")))
+    match outcome {
+        Ok(user) => {
+            let jar = start_session(jar, &user, &repository, &state.config).await?;
+            Ok((jar, Redirect::to("/")))
+        }
+        Err(error) => {
+            let flash = business_flash(error)?;
+            Ok((
+                set_flash(jar, &flash, state.config.cookie_secure),
+                Redirect::to("/register"),
+            ))
+        }
+    }
 }
 
 /// Emite o par de cookies da sessão: o JWT de acesso (curto) e o refresh token
@@ -204,6 +245,7 @@ struct AssetsPage {
     page: u32,
     has_prev: bool,
     has_next: bool,
+    flash: Option<Flash>,
 }
 
 enum WalletAction {
@@ -272,6 +314,7 @@ async fn render_wallet(
     action: WalletAction,
     query: &PageQuery,
 ) -> Result<(CookieJar, Html<String>), AppError> {
+    let (jar, flash) = take_flash(jar);
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
 
     let view = portfolio
@@ -289,6 +332,7 @@ async fn render_wallet(
         page: view.page,
         has_prev: view.has_prev,
         has_next: view.has_next,
+        flash,
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -299,16 +343,40 @@ struct AmountForm {
     csrf_token: String,
 }
 
+/// Converte o desfecho de uma operação da carteira em redirect + flash: sucesso
+/// vira a mensagem dada, erro de negócio vira banner, erro interno propaga.
+fn wallet_redirect(
+    jar: CookieJar,
+    outcome: Result<(), AppError>,
+    on_success: Flash,
+    state: &AppState,
+) -> Result<(CookieJar, Redirect), AppError> {
+    let flash = match outcome {
+        Ok(()) => on_success,
+        Err(error) => business_flash(error)?,
+    };
+
+    Ok((
+        set_flash(jar, &flash, state.config.cookie_secure),
+        Redirect::to("/assets"),
+    ))
+}
+
 #[instrument(skip_all)]
 async fn deposit(
+    State(state): State<AppState>,
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
     Form(form): Form<AmountForm>,
-) -> Result<Redirect, AppError> {
-    verify_csrf(&jar, &form.csrf_token)?;
-    portfolio.deposit(user.id(), form.amount).await?;
-    Ok(Redirect::to("/assets"))
+) -> Result<(CookieJar, Redirect), AppError> {
+    let outcome = async {
+        verify_csrf(&jar, &form.csrf_token)?;
+        portfolio.deposit(user.id(), form.amount).await
+    }
+    .await;
+
+    wallet_redirect(jar, outcome, Flash::success("depósito realizado."), &state)
 }
 
 #[derive(Deserialize)]
@@ -320,30 +388,38 @@ struct TradeAssetForm {
 
 #[instrument(skip_all)]
 async fn buy_asset(
+    State(state): State<AppState>,
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
     Form(form): Form<TradeAssetForm>,
-) -> Result<Redirect, AppError> {
-    verify_csrf(&jar, &form.csrf_token)?;
-    portfolio
-        .buy(user.id(), form.asset_id, form.quantity)
-        .await?;
-    Ok(Redirect::to("/assets"))
+) -> Result<(CookieJar, Redirect), AppError> {
+    let outcome = async {
+        verify_csrf(&jar, &form.csrf_token)?;
+        portfolio.buy(user.id(), form.asset_id, form.quantity).await
+    }
+    .await;
+
+    wallet_redirect(jar, outcome, Flash::success("compra realizada."), &state)
 }
 
 #[instrument(skip_all)]
 async fn sell_asset(
+    State(state): State<AppState>,
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
     Form(form): Form<TradeAssetForm>,
-) -> Result<Redirect, AppError> {
-    verify_csrf(&jar, &form.csrf_token)?;
-    portfolio
-        .sell(user.id(), form.asset_id, form.quantity)
-        .await?;
-    Ok(Redirect::to("/assets"))
+) -> Result<(CookieJar, Redirect), AppError> {
+    let outcome = async {
+        verify_csrf(&jar, &form.csrf_token)?;
+        portfolio
+            .sell(user.id(), form.asset_id, form.quantity)
+            .await
+    }
+    .await;
+
+    wallet_redirect(jar, outcome, Flash::success("venda realizada."), &state)
 }
 
 /// O formulário de sincronizar cotações não tem campo de dado nenhum, mas ainda
@@ -355,14 +431,24 @@ struct SyncQuotesForm {
 
 #[instrument(skip_all)]
 async fn sync_quotes(
+    State(state): State<AppState>,
     _user: User,
     repository: Repository,
     jar: CookieJar,
     Form(form): Form<SyncQuotesForm>,
-) -> Result<Redirect, AppError> {
-    verify_csrf(&jar, &form.csrf_token)?;
-    sync_market_quotes(&repository).await?;
-    Ok(Redirect::to("/assets"))
+) -> Result<(CookieJar, Redirect), AppError> {
+    let outcome = async {
+        verify_csrf(&jar, &form.csrf_token)?;
+        sync_market_quotes(&repository).await.map(|_| ())
+    }
+    .await;
+
+    wallet_redirect(
+        jar,
+        outcome,
+        Flash::success("cotações atualizadas."),
+        &state,
+    )
 }
 
 pub mod filters {
