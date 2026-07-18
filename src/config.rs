@@ -27,6 +27,8 @@ pub struct Config {
     pub session_ttl_minutes: u64,
     /// Validade do REFRESH token (e da linha em `sessions`), em dias.
     pub refresh_ttl_days: u64,
+    /// Intervalo do job de cotações, em minutos. Zero desliga o job.
+    pub quotes_sync_minutes: u64,
 }
 
 impl Config {
@@ -48,7 +50,20 @@ impl Config {
                 .wrap_err("BIND_ADDR não é um endereço de socket válido (ex.: 0.0.0.0:3000)")?,
             session_ttl_minutes: optional_positive("SESSION_TTL_MINUTES", 10)?,
             refresh_ttl_days: optional_positive("REFRESH_TTL_DAYS", 14)?,
+            quotes_sync_minutes: optional_non_negative("QUOTES_SYNC_MINUTES", 10)?,
         })
+    }
+}
+
+/// Como `optional_positive`, mas aceita zero — usado onde zero significa
+/// "desligado" (ex.: o job de cotações).
+fn optional_non_negative(key: &str, default: u64) -> color_eyre::Result<u64> {
+    match std::env::var(key) {
+        Err(_) => Ok(default),
+        Ok(value) => value
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| eyre!("{key} deve ser um inteiro >= 0 (recebido: {value:?})")),
     }
 }
 

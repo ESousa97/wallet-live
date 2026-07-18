@@ -71,6 +71,9 @@ impl App {
 
         let state = AppState::build(config).await?;
 
+        // Job de cotações em segundo plano (rodada imediata + intervalo).
+        crate::quotes::spawn_scheduled_sync(state.clone());
+
         let listener = TcpListener::bind(bind_addr).await?;
         info!(%bind_addr, "starting service");
 
