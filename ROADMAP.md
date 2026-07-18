@@ -44,7 +44,9 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   `Referrer-Policy` e HSTS quando atrás de HTTPS.
 - [x] TTLs de sessão configuráveis por ambiente (`SESSION_TTL_MINUTES`,
   `REFRESH_TTL_DAYS`).
-- [ ] Ativos estáticos servidos localmente (sem CDN de terceiros).
+- [x] Ativos estáticos servidos localmente: o bundle do Tailwind é embutido no
+  binário e servido em `/static/tailwind.js` — zero requisições a terceiros e
+  `script-src 'self'` na CSP.
 
 ## 🏗️ Fase 3 — Arquitetura e API
 
@@ -85,9 +87,17 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
 
 ## 📈 Fase 5 — Produto e UX
 
+- [x] Mensagens de feedback nos formulários: erros de negócio e confirmações
+  viram banners acessíveis (`role=alert/status`) em pt-BR via *flash cookie*
+  de uso único; a tela de login não confirma mais se um username existe.
+- [x] Exportação do extrato em CSV (`/transactions.csv`, autenticado, convenção
+  pt-BR de planilha).
+- [x] Atualização agendada de cotações: job em segundo plano com rodada no boot
+  e intervalo configurável (`QUOTES_SYNC_MINUTES`, zero desliga).
+- [x] Formatação pt-BR consistente (moeda, quantidades, datas, CSV).
 - [ ] Operações sem recarregar a página (HTML parcial/htmx), mantendo SSR.
-- [ ] Mensagens de feedback (sucesso/erro) nos formulários.
-- [ ] Formatação por locale e internacionalização dos templates.
-- [ ] Acessibilidade: foco gerenciado nos formulários inline, navegação por teclado.
-- [ ] Atualização agendada de cotações (job periódico) e mais pares de mercado.
-- [ ] Exportação do extrato (CSV) e gráfico de evolução do patrimônio.
+- [ ] Internacionalização dos templates (multi-idioma).
+- [ ] Mais pares de mercado na sincronização de cotações.
+- [ ] Gráfico de evolução do patrimônio.
+- [ ] Acessibilidade: foco gerenciado nos formulários inline, navegação por
+  teclado ponta a ponta.

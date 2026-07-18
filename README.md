@@ -10,9 +10,13 @@ operações **transacionais** e cotações de mercado reais.
 - **Carteira completa** — saldo em caixa, depósito, compra e venda de ativos ao
   preço de mercado, custo médio ponderado por posição, lucro/prejuízo por ativo
   e resumo do patrimônio.
-- **Extrato** — livro-razão imutável de transações (depósitos, compras, vendas).
-- **Cotações reais** — sincronização de preços (`USD→BRL`, `BTC→BRL`) via API
-  pública da Coinbase, aplicada em um único `UPDATE` (sem N+1).
+- **Extrato** — livro-razão imutável de transações (depósitos, compras,
+  vendas), paginado na interface e exportável em **CSV**.
+- **Cotações reais** — preços (`USD→BRL`, `BTC→BRL`) da API pública da
+  Coinbase, com **sincronização agendada** em segundo plano (e botão manual),
+  aplicada em um único `UPDATE` (sem N+1).
+- **Feedback nas operações** — sucessos e erros de negócio viram banners
+  acessíveis em pt-BR (flash messages), nunca JSON cru na tela.
 - **Autenticação e sessão** — cadastro/login com hash de senha (argon2); sessão
   com **JWT de acesso curto** + **refresh token rotacionado e revogável**
   (logout mata a sessão no servidor), ambos em cookies `HttpOnly` +
@@ -80,6 +84,8 @@ migrations/          # schema versionado, up/down reversíveis
 | `GET` | `/logout` | — | Revoga a sessão no servidor e remove os cookies |
 | `GET` | `/` | opcional | Com sessão vai para `/assets`; sem, para `/login` |
 | `GET` | `/assets` | sessão | Carteira: saldo, posições, resumo e extrato (paginado via `?page=`) |
+| `GET` | `/transactions.csv` | sessão | Download do extrato completo em CSV |
+| `GET` | `/static/tailwind.js` | — | Bundle CSS/JS servido do próprio binário (sem CDN) |
 | `POST` | `/deposit` | sessão | Deposita saldo (`amount`) |
 | `POST` | `/buy` | sessão | Compra um ativo (`asset_id`, `quantity`) ao preço atual |
 | `POST` | `/sell` | sessão | Vende um ativo (`asset_id`, `quantity`) ao preço atual |
@@ -117,6 +123,7 @@ Variáveis de ambiente (ver `.env.example`):
 | `SESSION_TTL_MINUTES` | não (`10`) | Validade do token de acesso |
 | `REFRESH_TTL_DAYS` | não (`14`) | Validade do refresh token (sessão no servidor) |
 | `LOG_FORMAT` | não (texto) | `json` emite uma linha JSON por evento (agregadores de log) |
+| `QUOTES_SYNC_MINUTES` | não (`10`) | Intervalo do job de cotações (`0` desliga) |
 | `RUST_LOG` | não (`info`) | Nível de log (ex.: `wallet=debug,info`) |
 
 ## Como rodar
