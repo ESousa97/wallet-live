@@ -42,38 +42,75 @@ struct CoinbaseRates {
     rates: HashMap<String, Decimal>,
 }
 
+/// Pares suportados: código na API de câmbio → nomes de ativo que casam no
+/// catálogo (normalizados para minúsculas pelo repository).
+const MARKET_PAIRS: &[(&str, &[&str])] = &[
+    ("USD", &["dolar", "dólar", "usd"]),
+    ("EUR", &["euro", "eur"]),
+    ("BTC", &["bitcoin", "btc"]),
+    ("ETH", &["ethereum", "eth"]),
+    ("SOL", &["solana", "sol"]),
+];
+
+/// Atualiza os preços do catálogo com as cotações de mercado. UMA chamada só:
+/// a API devolve todas as taxas BRL→moeda de uma vez, e o preço em BRL de cada
+/// par é o inverso da taxa (BRL→USD = 0,2 ⇒ 1 USD = 5 BRL). Um par ausente na
+/// resposta é pulado — os demais atualizam mesmo assim.
 pub async fn sync_market_quotes(repository: &Repository) -> Result<usize, AppError> {
-    let (usd_brl, btc_brl) = tokio::try_join!(fetch_usd_brl(), fetch_btc_brl())?;
+    let rates = fetch_brl_rates().await?;
 
     let mut updates = HashMap::new();
     updates.insert("real", Decimal::ONE);
     updates.insert("brl", Decimal::ONE);
-    updates.insert("dolar", usd_brl);
-    updates.insert("dólar", usd_brl);
-    updates.insert("usd", usd_brl);
-    updates.insert("bitcoin", btc_brl);
-    updates.insert("btc", btc_brl);
+
+    for (code, names) in MARKET_PAIRS {
+        if let Some(price) = brl_price(&rates, code) {
+            for name in *names {
+                updates.insert(name, price);
+            }
+        }
+    }
 
     repository.update_known_asset_prices(&updates).await
 }
 
-async fn fetch_usd_brl() -> Result<Decimal, AppError> {
-    fetch_coinbase_rate("USD", "BRL").await
-}
-
-async fn fetch_btc_brl() -> Result<Decimal, AppError> {
-    fetch_coinbase_rate("BTC", "BRL").await
-}
-
-async fn fetch_coinbase_rate(base: &str, quote: &str) -> Result<Decimal, AppError> {
-    let url = format!("https://api.coinbase.com/v2/exchange-rates?currency={base}");
+/// Todas as taxas partindo do BRL (BRL→moeda) numa requisição.
+async fn fetch_brl_rates() -> Result<HashMap<String, Decimal>, AppError> {
     let response: CoinbaseRatesResponse =
-        reqwest::get(url).await?.error_for_status()?.json().await?;
+        reqwest::get("https://api.coinbase.com/v2/exchange-rates?currency=BRL")
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
 
-    response
-        .data
-        .rates
-        .get(quote)
-        .copied()
-        .ok_or(AppError::QuoteUnavailable)
+    Ok(response.data.rates)
+}
+
+/// Preço em BRL de uma unidade da moeda `code`: o inverso da taxa BRL→moeda.
+/// Taxa ausente ou não positiva (não dá para inverter) vira `None`.
+fn brl_price(rates: &HashMap<String, Decimal>, code: &str) -> Option<Decimal> {
+    let rate = rates.get(code)?;
+    if *rate <= Decimal::ZERO {
+        return None;
+    }
+    Some(Decimal::ONE / rate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn brl_price_inverts_the_rate_and_rejects_the_uninvertible() {
+        let mut rates = HashMap::new();
+        rates.insert("USD".to_string(), dec!(0.2)); // 1 BRL = 0,2 USD
+        rates.insert("ZERO".to_string(), dec!(0));
+
+        // 1 USD = 1 / 0,2 = 5 BRL.
+        assert_eq!(brl_price(&rates, "USD"), Some(dec!(5)));
+        // Taxa zero não é invertível; moeda desconhecida não existe.
+        assert_eq!(brl_price(&rates, "ZERO"), None);
+        assert_eq!(brl_price(&rates, "XYZ"), None);
+    }
 }
