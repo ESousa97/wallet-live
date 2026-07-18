@@ -1,6 +1,7 @@
 use askama::Template;
 use axum::Router;
 use axum::extract::{Form, Query, State};
+use axum::http::header;
 use axum::response::{Html, Redirect};
 use axum::routing::get;
 use axum_extra::extract::cookie::{Cookie, CookieJar};
@@ -24,6 +25,7 @@ use crate::services::portfolio::PortfolioService;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(index))
+        .route("/static/tailwind.js", get(tailwind_js))
         .route("/login", get(login_page).post(login))
         .route("/register", get(register_page).post(register))
         .route("/logout", get(logout))
@@ -32,6 +34,22 @@ pub fn router() -> Router<AppState> {
         .route("/buy", get(buy_page).post(buy_asset))
         .route("/sell", get(sell_page).post(sell_asset))
         .route("/quotes/sync", get(assets_page).post(sync_quotes))
+}
+
+/// Tailwind servido do próprio binário (`include_str!` embute o bundle em tempo
+/// de compilação, como o askama faz com os templates): nada de CDN de terceiros
+/// — sem dependência externa em runtime, sem telemetria alheia, e a CSP pode
+/// travar `script-src` em `'self'`.
+#[instrument(skip_all)]
+async fn tailwind_js() -> impl axum::response::IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            // Um dia de cache: o arquivo só muda quando o binário muda.
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        include_str!("../../static/tailwind.js"),
+    )
 }
 
 #[derive(Template)]

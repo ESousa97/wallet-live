@@ -197,11 +197,12 @@ fn new_request_id() -> String {
 
 /// Cabeçalhos de segurança aplicados a toda resposta:
 ///
-/// - **CSP** restringe de onde a página pode carregar código/estilo: scripts só
-///   do próprio site e do CDN do Tailwind (dependência atual dos templates);
-///   `style-src 'unsafe-inline'` porque o Tailwind em modo CDN injeta `<style>`
-///   em runtime; `frame-ancestors 'none'` bloqueia clickjacking; `form-action
-///   'self'` impede formulários de postarem para fora.
+/// - **CSP** restringe de onde a página pode carregar código/estilo: scripts
+///   apenas do próprio site (o Tailwind é servido pelo binário em
+///   `/static/tailwind.js`); `style-src 'unsafe-inline'` porque esse bundle
+///   injeta `<style>` em runtime; `frame-ancestors 'none'` bloqueia
+///   clickjacking; `form-action 'self'` impede formulários de postarem para
+///   fora.
 /// - **nosniff** impede o navegador de "adivinhar" content-type.
 /// - **Referrer-Policy** não vaza URLs internas para sites de destino.
 /// - **HSTS** só quando o serviço está atrás de HTTPS (mesmo sinal do cookie
@@ -213,7 +214,7 @@ async fn security_headers(State(state): State<AppState>, request: Request, next:
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
-            "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com; \
+            "default-src 'self'; script-src 'self'; \
              style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
              connect-src 'self'; frame-ancestors 'none'; form-action 'self'; \
              base-uri 'self'; object-src 'none'",
