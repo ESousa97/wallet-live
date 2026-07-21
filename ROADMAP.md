@@ -87,7 +87,13 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   resposta e presente em todos os logs do span).
 - [x] Sondas separadas: liveness (`/healthz`, sem tocar o banco) e readiness
   (`/readyz`, exige o banco são).
-- [ ] Exportação OpenTelemetry (traces e métricas).
+- [x] Exportação OpenTelemetry: cada requisição vira um trace (span `request`
+  com os `#[instrument]` dos handlers aninhados dentro) e alimenta o
+  histograma `http.server.request.duration`, exportados via OTLP/HTTP quando
+  `OTEL_EXPORTER_OTLP_ENDPOINT` está definida — ausente, zero overhead, zero
+  tentativa de conexão. Coletor local (`docker compose --profile observability
+  up otel-collector`) para verificar a exportação sem montar um backend de
+  verdade.
 
 ## 📈 Fase 5 — Produto e UX
 

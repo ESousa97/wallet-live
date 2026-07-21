@@ -27,8 +27,8 @@ operações **transacionais** e cotações de mercado reais.
   comparação em tempo constante.
 - **Pronto para orquestração** — migrações aplicadas no boot, sondas de
   liveness/readiness separadas (`/healthz`, `/readyz`), desligamento gracioso,
-  logs estruturados com `request_id` por requisição (JSON opcional) e imagem
-  Docker multi-stage.
+  logs estruturados com `request_id` por requisição (JSON opcional), traces e
+  métricas exportáveis via OTLP e imagem Docker multi-stage.
 
 ## Decisões de engenharia
 
@@ -50,7 +50,8 @@ operações **transacionais** e cotações de mercado reais.
 ```
 src/
   main.rs            # enxuta: tokio::main -> App::start()
-  app.rs             # boot, AppState { db, config }, /health, shutdown gracioso
+  app.rs             # boot, AppState { db, config, ... }, /health, shutdown gracioso,
+                     # tracing + métricas (exportação OTLP opcional)
   config.rs          # Config: lê e valida o ambiente uma vez (fail-fast)
   models.rs          # Asset, UserRecord, WalletSummary, Holding, Transaction
   error.rs           # AppError + IntoResponse (status HTTP, censura de 5xx)
@@ -126,6 +127,8 @@ Variáveis de ambiente (ver `.env.example`):
 | `LOG_FORMAT` | não (texto) | `json` emite uma linha JSON por evento (agregadores de log) |
 | `QUOTES_SYNC_MINUTES` | não (`10`) | Intervalo do job de cotações (`0` desliga) |
 | `RUST_LOG` | não (`info`) | Nível de log (ex.: `wallet=debug,info`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | não (desligado) | Endpoint OTLP (HTTP) para exportar traces e métricas — ausente, nada é exportado |
+| `OTEL_SERVICE_NAME` | não (`wallet`) | Nome do serviço no backend de observabilidade |
 
 ## Como rodar
 
@@ -162,6 +165,27 @@ proxy corporativo ou antivírus com inspeção TLS, veja
 Abra <http://localhost:3000>, cadastre um usuário e use a carteira: deposite,
 compre/venda ativos e sincronize as cotações. A sessão persiste no cookie;
 token removido, adulterado ou expirado leva de volta ao login.
+
+### Observabilidade (traces e métricas)
+
+Com `OTEL_EXPORTER_OTLP_ENDPOINT` definida, cada requisição HTTP vira um trace
+(span `request`, com os spans dos handlers `#[instrument]` aninhados dentro) e
+alimenta o histograma `http.server.request.duration` (rotulado por método,
+rota e status) — exportados via OTLP/HTTP para o endpoint configurado. Sem a
+variável, nada disso roda: zero tentativa de conexão, zero overhead.
+
+Para ver a exportação funcionando localmente, sem montar um backend de
+observabilidade de verdade:
+
+```powershell
+docker compose --profile observability up -d otel-collector
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4318'
+cargo run
+```
+
+`docker compose logs -f otel-collector` mostra cada trace e cada ponto de
+métrica recebido — o coletor só imprime, não repassa a lugar nenhum
+(`docker/otel-collector/config.yaml`).
 
 ### Exemplo de uso da API administrativa
 

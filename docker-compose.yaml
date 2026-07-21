@@ -41,5 +41,19 @@ services:
       timeout: 3s
       retries: 5
 
+  # Coletor OTLP para ver localmente o que `OTEL_EXPORTER_OTLP_ENDPOINT` faz o
+  # wallet exportar (perfil opcional: `docker compose --profile observability
+  # up`). Só imprime o que recebe (`docker compose logs -f otel-collector`) —
+  # não é um backend de observabilidade de verdade, é uma sonda de
+  # verificação. Aponte o wallet para `http://localhost:4318`.
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./docker/otel-collector/config.yaml:/etc/otelcol/config.yaml
+    ports:
+      - "4318:4318"
+
 volumes:
   pgdata:

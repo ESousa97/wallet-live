@@ -1,0 +1,22 @@
+# Coletor OTLP mínimo para desenvolvimento local: recebe o que o wallet exporta
+# (traces + métricas) e só imprime no próprio log — sem repassar a nenhum
+# backend de verdade (Jaeger/Prometheus/etc). Serve para VERIFICAR que a
+# exportação está saindo do serviço, não para operar em produção.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      exporters: [debug]
