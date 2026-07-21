@@ -63,7 +63,8 @@ src/
     csrf.rs          # proteção CSRF (double-submit cookie)
     throttle.rs      # lockout progressivo de login
   services/
-    portfolio.rs     # PortfolioService: visão da carteira + operações (regra de negócio)
+    portfolio.rs     # PortfolioService: visão da carteira + operações, genérico sobre
+                      # o trait PortfolioRepository (testável sem banco)
   routes/
     api.rs           # API REST administrativa (JSON) + OpenAPI + testes de snapshot
     frontend.rs      # SSR: login/logout, carteira, operações, filtros Askama
@@ -189,6 +190,9 @@ cargo test
   entradas.
 - O contrato JSON da API é congelado com **insta** (snapshot testing):
   `cargo insta review` para auditar mudanças de formato.
+- A **orquestração do `PortfolioService`** (montagem da `WalletView`,
+  propagação de erro de depósito/compra/venda) é testada contra um dublê em
+  memória do `PortfolioRepository` — sem Postgres, sem `#[sqlx::test]`.
 
 ## Roadmap
 

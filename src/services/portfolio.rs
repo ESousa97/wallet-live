@@ -99,18 +99,121 @@ fn equity_chart(snapshots: &[PortfolioSnapshot]) -> EquityChart {
     }
 }
 
+/// O subconjunto do `Repository` que o `PortfolioService` precisa. Existe para
+/// que o serviço possa ser testado com um dublê em memória, sem banco — o
+/// `Repository` real implementa este trait delegando para seus métodos
+/// inerentes (a resolução de métodos do Rust prefere o inerente, então não há
+/// recursão).
+// `wallet` não expõe uma lib crate — o trait não cruza fronteira de crate, então
+// a falta de bound `Send` explícito (o que o lint cobra) não arrisca um
+// implementador não-`Send` vazar para o runtime multi-thread do axum; o único
+// implementador de produção (`Repository`) já é `Send` e isso é checado onde
+// os handlers o usam.
+#[allow(async_fn_in_trait)]
+pub trait PortfolioRepository {
+    async fn wallet_summary(&self, user_id: i64) -> Result<WalletSummary, AppError>;
+    async fn list_holdings(&self, user_id: i64) -> Result<Vec<Holding>, AppError>;
+    async fn list_assets(&self) -> Result<Vec<Asset>, AppError>;
+    async fn list_transactions(
+        &self,
+        user_id: i64,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Transaction>, AppError>;
+    async fn count_transactions(&self, user_id: i64) -> Result<i64, AppError>;
+    async fn list_portfolio_snapshots(
+        &self,
+        user_id: i64,
+        limit: i64,
+    ) -> Result<Vec<PortfolioSnapshot>, AppError>;
+    async fn deposit(&self, user_id: i64, amount: Decimal) -> Result<(), AppError>;
+    async fn buy_asset(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError>;
+    async fn sell_asset(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError>;
+}
+
+impl PortfolioRepository for Repository {
+    async fn wallet_summary(&self, user_id: i64) -> Result<WalletSummary, AppError> {
+        Ok(self.wallet_summary(user_id).await?)
+    }
+
+    async fn list_holdings(&self, user_id: i64) -> Result<Vec<Holding>, AppError> {
+        Ok(self.list_holdings(user_id).await?)
+    }
+
+    async fn list_assets(&self) -> Result<Vec<Asset>, AppError> {
+        Ok(self.list_assets().await?)
+    }
+
+    async fn list_transactions(
+        &self,
+        user_id: i64,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Transaction>, AppError> {
+        Ok(self.list_transactions(user_id, limit, offset).await?)
+    }
+
+    async fn count_transactions(&self, user_id: i64) -> Result<i64, AppError> {
+        Ok(self.count_transactions(user_id).await?)
+    }
+
+    async fn list_portfolio_snapshots(
+        &self,
+        user_id: i64,
+        limit: i64,
+    ) -> Result<Vec<PortfolioSnapshot>, AppError> {
+        Ok(self.list_portfolio_snapshots(user_id, limit).await?)
+    }
+
+    async fn deposit(&self, user_id: i64, amount: Decimal) -> Result<(), AppError> {
+        self.deposit(user_id, amount).await
+    }
+
+    async fn buy_asset(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError> {
+        self.buy_asset(user_id, asset_id, quantity).await
+    }
+
+    async fn sell_asset(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        quantity: Decimal,
+    ) -> Result<(), AppError> {
+        self.sell_asset(user_id, asset_id, quantity).await
+    }
+}
+
 /// Serviço da carteira do usuário: orquestra as operações (depósito, compra,
 /// venda) e a montagem da visão da carteira. Os handlers ficam responsáveis só
 /// pelo HTTP (formulários, CSRF, redirects); o repository, só pelo SQL.
 ///
+/// Genérico sobre `PortfolioRepository` (padrão para `Repository`, o que
+/// mantém `PortfolioService` usável sem `<...>` em toda a base) para que os
+/// testes possam injetar um dublê em memória em vez do Postgres.
+///
 /// Também é um extrator do Axum, como o `Repository` — declarar um parâmetro
 /// `PortfolioService` num handler é tudo que é preciso para usá-lo.
-pub struct PortfolioService {
-    repository: Repository,
+pub struct PortfolioService<R: PortfolioRepository = Repository> {
+    repository: R,
 }
 
-impl PortfolioService {
-    pub fn new(repository: Repository) -> Self {
+impl<R: PortfolioRepository> PortfolioService<R> {
+    pub fn new(repository: R) -> Self {
         Self { repository }
     }
 
@@ -190,6 +293,8 @@ impl FromRequestParts<AppState> for PortfolioService {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
     use rust_decimal_macros::dec;
     use time::macros::datetime;
@@ -245,5 +350,193 @@ mod tests {
         assert!(!has_next_page(0, 25, 25));
         // Extrato vazio.
         assert!(!has_next_page(0, 0, 0));
+    }
+
+    /// Dublê de `Repository` para testar a orquestração do `PortfolioService`
+    /// sem banco. Devolve exatamente os dados configurados, sem lógica própria —
+    /// a matemática financeira (custo médio, saldo, guardas) já tem cobertura
+    /// contra o Postgres real em `repository.rs`; aqui o alvo é só a montagem
+    /// da `WalletView` e a propagação de erro das operações.
+    struct FakeRepository {
+        summary: WalletSummary,
+        holdings: Vec<Holding>,
+        assets: Vec<Asset>,
+        transactions: Vec<Transaction>,
+        transaction_count: i64,
+        snapshots: Vec<PortfolioSnapshot>,
+        deposit_result: RefCell<Result<(), AppError>>,
+        buy_result: RefCell<Result<(), AppError>>,
+        sell_result: RefCell<Result<(), AppError>>,
+    }
+
+    impl Default for FakeRepository {
+        fn default() -> Self {
+            Self {
+                summary: WalletSummary {
+                    balance: Decimal::ZERO,
+                    holdings_value: Decimal::ZERO,
+                    total_value: Decimal::ZERO,
+                    total_invested: Decimal::ZERO,
+                    total_delta: Decimal::ZERO,
+                },
+                holdings: Vec::new(),
+                assets: Vec::new(),
+                transactions: Vec::new(),
+                transaction_count: 0,
+                snapshots: Vec::new(),
+                deposit_result: RefCell::new(Ok(())),
+                buy_result: RefCell::new(Ok(())),
+                sell_result: RefCell::new(Ok(())),
+            }
+        }
+    }
+
+    impl PortfolioRepository for FakeRepository {
+        async fn wallet_summary(&self, _user_id: i64) -> Result<WalletSummary, AppError> {
+            Ok(self.summary.clone())
+        }
+
+        async fn list_holdings(&self, _user_id: i64) -> Result<Vec<Holding>, AppError> {
+            Ok(self.holdings.clone())
+        }
+
+        async fn list_assets(&self) -> Result<Vec<Asset>, AppError> {
+            Ok(self.assets.clone())
+        }
+
+        async fn list_transactions(
+            &self,
+            _user_id: i64,
+            _limit: i64,
+            _offset: i64,
+        ) -> Result<Vec<Transaction>, AppError> {
+            Ok(self.transactions.clone())
+        }
+
+        async fn count_transactions(&self, _user_id: i64) -> Result<i64, AppError> {
+            Ok(self.transaction_count)
+        }
+
+        async fn list_portfolio_snapshots(
+            &self,
+            _user_id: i64,
+            _limit: i64,
+        ) -> Result<Vec<PortfolioSnapshot>, AppError> {
+            Ok(self.snapshots.clone())
+        }
+
+        async fn deposit(&self, _user_id: i64, _amount: Decimal) -> Result<(), AppError> {
+            self.deposit_result.replace(Ok(()))
+        }
+
+        async fn buy_asset(
+            &self,
+            _user_id: i64,
+            _asset_id: i64,
+            _quantity: Decimal,
+        ) -> Result<(), AppError> {
+            self.buy_result.replace(Ok(()))
+        }
+
+        async fn sell_asset(
+            &self,
+            _user_id: i64,
+            _asset_id: i64,
+            _quantity: Decimal,
+        ) -> Result<(), AppError> {
+            self.sell_result.replace(Ok(()))
+        }
+    }
+
+    fn holding(name: &str) -> Holding {
+        Holding {
+            id: 1,
+            name: name.to_string(),
+            unit_value: dec!(10),
+            quantity_owned: dec!(2),
+            avg_cost: dec!(8),
+            current_value: dec!(20),
+            invested_value: dec!(16),
+            value_delta: dec!(4),
+        }
+    }
+
+    fn transaction() -> Transaction {
+        Transaction {
+            id: 1,
+            kind: "deposit".to_string(),
+            asset_name: None,
+            quantity: None,
+            unit_value: None,
+            cash_delta: dec!(1),
+            created_at: datetime!(2026-07-18 12:00 UTC),
+        }
+    }
+
+    #[tokio::test]
+    async fn wallet_view_assembles_repository_data_and_paginates() {
+        let fake = FakeRepository {
+            summary: WalletSummary {
+                balance: dec!(70),
+                holdings_value: dec!(30),
+                total_value: dec!(100),
+                total_invested: dec!(20),
+                total_delta: dec!(10),
+            },
+            holdings: vec![holding("bitcoin")],
+            assets: vec![Asset {
+                id: 1,
+                name: "bitcoin".to_string(),
+                unit_value: dec!(10),
+            }],
+            transactions: vec![transaction(); 25],
+            // Mais transações no total do que a página devolveu: há próxima.
+            transaction_count: 27,
+            snapshots: vec![snapshot(dec!(100)), snapshot(dec!(130))],
+            ..FakeRepository::default()
+        };
+
+        let service = PortfolioService::new(fake);
+        let view = service.wallet_view(1, 1).await.expect("wallet view");
+
+        assert_eq!(view.summary.total_value, dec!(100));
+        assert_eq!(view.holdings.len(), 1);
+        assert_eq!(view.available_assets.len(), 1);
+        assert_eq!(view.transactions.len(), 25);
+        assert_eq!(view.page, 1);
+        assert!(!view.has_prev);
+        assert!(view.has_next);
+        assert!(view.chart.has_data());
+        assert_eq!(view.chart.latest_value, dec!(130));
+    }
+
+    #[tokio::test]
+    async fn deposit_result_flows_through_unchanged() {
+        let service = PortfolioService::new(FakeRepository::default());
+        assert!(service.deposit(1, dec!(50)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn buy_error_flows_through_unchanged() {
+        let fake = FakeRepository {
+            buy_result: RefCell::new(Err(AppError::InsufficientBalance)),
+            ..FakeRepository::default()
+        };
+        let service = PortfolioService::new(fake);
+
+        let result = service.buy(1, 1, dec!(1)).await;
+        assert!(matches!(result, Err(AppError::InsufficientBalance)));
+    }
+
+    #[tokio::test]
+    async fn sell_error_flows_through_unchanged() {
+        let fake = FakeRepository {
+            sell_result: RefCell::new(Err(AppError::InsufficientHoldings)),
+            ..FakeRepository::default()
+        };
+        let service = PortfolioService::new(fake);
+
+        let result = service.sell(1, 1, dec!(1)).await;
+        assert!(matches!(result, Err(AppError::InsufficientHoldings)));
     }
 }

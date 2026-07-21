@@ -64,7 +64,11 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   formulários da própria sessão) e toda leitura é filtrada pelo usuário da
   sessão — enumeração não expõe dados de terceiros. Reavaliar se a API se
   tornar pública ou multi-tenant.
-- [ ] Abstração do repositório via trait, permitindo testes de serviço sem banco.
+- [x] Abstração do repositório via trait: `PortfolioRepository` cobre o
+  subconjunto que o `PortfolioService` usa (`Repository` o implementa
+  delegando aos métodos inerentes); testes de orquestração — montagem da
+  `WalletView`, propagação de erro de depósito/compra/venda — rodam contra um
+  dublê em memória, sem Postgres.
 
 ## ⚙️ Fase 4 — Operação
 

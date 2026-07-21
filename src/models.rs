@@ -30,6 +30,7 @@ pub struct UserRecord {
     pub role: String,
 }
 
+#[derive(Clone)]
 pub struct WalletSummary {
     pub balance: Decimal,
     pub holdings_value: Decimal,
@@ -38,6 +39,7 @@ pub struct WalletSummary {
     pub total_delta: Decimal,
 }
 
+#[derive(Clone)]
 pub struct Holding {
     pub id: i64,
     pub name: String,
@@ -50,11 +52,13 @@ pub struct Holding {
 }
 
 /// Um ponto da série do patrimônio (usado pelo gráfico de evolução).
+#[derive(Clone)]
 pub struct PortfolioSnapshot {
     pub total_value: Decimal,
     pub captured_at: OffsetDateTime,
 }
 
+#[derive(Clone)]
 pub struct Transaction {
     pub id: i64,
     pub kind: String,
