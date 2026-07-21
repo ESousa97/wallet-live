@@ -4,6 +4,7 @@
 
 {% block content %}
 <main class="mx-auto max-w-6xl px-6 py-8">
+    <a href="#conteudo" class="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-neutral-100 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-neutral-900">pular para o conteúdo</a>
     <header class="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
             <h1 class="text-2xl font-semibold tracking-tight">wallet</h1>
@@ -31,7 +32,7 @@
     {% when None %}
     {% endmatch %}
 
-    <section class="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-neutral-800 bg-neutral-800 sm:grid-cols-5">
+    <section id="conteudo" tabindex="-1" class="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-neutral-800 bg-neutral-800 outline-none sm:grid-cols-5">
         <div class="bg-neutral-900/90 px-5 py-4">
             <p class="text-xs text-neutral-500">saldo</p>
             <p class="mt-1 text-lg font-semibold tabular-nums">{{ summary.balance|money }}</p>
@@ -78,7 +79,7 @@
         <h2 class="mb-4 text-base font-semibold">depositar saldo</h2>
         <form method="post" action="/deposit" class="flex flex-col gap-3 sm:flex-row">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
+            <input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required autofocus aria-label="valor do depósito em reais" placeholder="valor em R$" class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
             <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">confirmar</button>
         </form>
     </section>
@@ -87,13 +88,13 @@
         <h2 class="mb-4 text-base font-semibold">comprar ativo</h2>
         <form method="post" action="/buy" class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <select name="asset_id" required class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
+            <select name="asset_id" required autofocus aria-label="ativo para comprar" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
                 <option value="" disabled selected>selecione um ativo</option>
                 {% for asset in available_assets %}
                 <option value="{{ asset.id }}">{{ asset.name }} @ {{ asset.unit_value|money }}</option>
                 {% endfor %}
             </select>
-            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="quantidade" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
+            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="quantidade" aria-label="quantidade a comprar" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
             <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">comprar</button>
         </form>
     </section>
@@ -102,13 +103,13 @@
         <h2 class="mb-4 text-base font-semibold">vender ativo</h2>
         <form method="post" action="/sell" class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <select name="asset_id" required class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
+            <select name="asset_id" required autofocus aria-label="posição para vender" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
                 <option value="" disabled selected>selecione uma posição</option>
                 {% for holding in holdings %}
                 <option value="{{ holding.id }}">{{ holding.name }} disponível: {{ holding.quantity_owned|quantity }}</option>
                 {% endfor %}
             </select>
-            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="quantidade" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
+            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="quantidade" aria-label="quantidade a vender" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
             <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">vender</button>
         </form>
     </section>

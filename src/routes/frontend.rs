@@ -418,20 +418,23 @@ struct AmountForm {
 
 /// Converte o desfecho de uma operação da carteira em redirect + flash: sucesso
 /// vira a mensagem dada, erro de negócio vira banner, erro interno propaga.
+/// Erro volta para `error_path` (a página do formulário de origem), para que o
+/// formulário re-renderize com o banner e o `autofocus` reposicione o foco.
 fn wallet_redirect(
     jar: CookieJar,
     outcome: Result<(), AppError>,
     on_success: Flash,
+    error_path: &str,
     state: &AppState,
 ) -> Result<(CookieJar, Redirect), AppError> {
-    let flash = match outcome {
-        Ok(()) => on_success,
-        Err(error) => business_flash(error)?,
+    let (flash, path) = match outcome {
+        Ok(()) => (on_success, "/assets"),
+        Err(error) => (business_flash(error)?, error_path),
     };
 
     Ok((
         set_flash(jar, &flash, state.config.cookie_secure),
-        Redirect::to("/assets"),
+        Redirect::to(path),
     ))
 }
 
@@ -449,7 +452,13 @@ async fn deposit(
     }
     .await;
 
-    wallet_redirect(jar, outcome, Flash::success("depósito realizado."), &state)
+    wallet_redirect(
+        jar,
+        outcome,
+        Flash::success("depósito realizado."),
+        "/deposit",
+        &state,
+    )
 }
 
 #[derive(Deserialize)]
@@ -473,7 +482,13 @@ async fn buy_asset(
     }
     .await;
 
-    wallet_redirect(jar, outcome, Flash::success("compra realizada."), &state)
+    wallet_redirect(
+        jar,
+        outcome,
+        Flash::success("compra realizada."),
+        "/buy",
+        &state,
+    )
 }
 
 #[instrument(skip_all)]
@@ -492,7 +507,13 @@ async fn sell_asset(
     }
     .await;
 
-    wallet_redirect(jar, outcome, Flash::success("venda realizada."), &state)
+    wallet_redirect(
+        jar,
+        outcome,
+        Flash::success("venda realizada."),
+        "/sell",
+        &state,
+    )
 }
 
 /// O formulário de sincronizar cotações não tem campo de dado nenhum, mas ainda
@@ -520,6 +541,7 @@ async fn sync_quotes(
         jar,
         outcome,
         Flash::success("cotações atualizadas."),
+        "/assets",
         &state,
     )
 }

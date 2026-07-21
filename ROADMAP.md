@@ -95,9 +95,12 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
 - [x] Atualização agendada de cotações: job em segundo plano com rodada no boot
   e intervalo configurável (`QUOTES_SYNC_MINUTES`, zero desliga).
 - [x] Formatação pt-BR consistente (moeda, quantidades, datas, CSV).
+- [x] Mais pares de mercado na sincronização de cotações: uma única chamada
+  BRL→\* cobre USD, EUR, BTC, ETH e SOL (preço = inverso da taxa).
+- [x] Gráfico de evolução do patrimônio: snapshots por rodada de cotações,
+  desenhados como SVG server-side (zero JavaScript, amigável à CSP).
+- [x] Acessibilidade: erro de negócio volta ao formulário de origem com
+  `autofocus` no primeiro campo, `aria-label` nos campos sem rótulo visível,
+  anel de foco uniforme (`:focus-visible`) e *skip link* para o conteúdo.
 - [ ] Operações sem recarregar a página (HTML parcial/htmx), mantendo SSR.
 - [ ] Internacionalização dos templates (multi-idioma).
-- [ ] Mais pares de mercado na sincronização de cotações.
-- [ ] Gráfico de evolução do patrimônio.
-- [ ] Acessibilidade: foco gerenciado nos formulários inline, navegação por
-  teclado ponta a ponta.
