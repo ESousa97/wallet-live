@@ -1,8 +1,11 @@
+use std::convert::Infallible;
+
 use askama::Template;
 use axum::Router;
-use axum::extract::{Form, Query, State};
-use axum::http::header;
-use axum::response::{Html, Redirect};
+use axum::extract::{Form, FromRequestParts, Query, State};
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, header};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use rust_decimal::Decimal;
@@ -21,12 +24,13 @@ use crate::models::{Asset, Holding, Transaction, WalletSummary};
 use crate::quotes::sync_quotes_round;
 use crate::repository::Repository;
 use crate::routes::flash::{Flash, business_flash, set_flash, take_flash};
-use crate::services::portfolio::{EquityChart, PortfolioService};
+use crate::services::portfolio::{EquityChart, PortfolioService, WalletView};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(index))
         .route("/static/tailwind.js", get(tailwind_js))
+        .route("/static/htmx.js", get(htmx_js))
         .route("/login", get(login_page).post(login))
         .route("/register", get(register_page).post(register))
         .route("/logout", get(logout))
@@ -52,6 +56,46 @@ async fn tailwind_js() -> impl axum::response::IntoResponse {
         ],
         include_str!("../../static/tailwind.js"),
     )
+}
+
+/// htmx servido do binário, pelo mesmo motivo do Tailwind acima: zero CDN e a
+/// CSP continua com `script-src 'self'`. É ele que transforma os links e
+/// formulários da carteira (atributos `hx-*` nos templates) em trocas parciais
+/// de HTML — o servidor segue renderizando tudo (SSR); só muda o quanto de
+/// página viaja e é re-desenhado por operação.
+#[instrument(skip_all)]
+async fn htmx_js() -> impl axum::response::IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        include_str!("../../static/htmx.js"),
+    )
+}
+
+/// `true` quando a resposta deve ser o fragmento parcial da carteira, não a
+/// página inteira: o htmx marca suas requisições com `HX-Request: true`. A
+/// exceção é a restauração de histórico (voltar/avançar com o cache local
+/// expirado), que vem com `HX-History-Restore-Request` e espera a página
+/// COMPLETA para reconstruir o estado do zero.
+fn is_partial_request(headers: &HeaderMap) -> bool {
+    headers
+        .get("hx-request")
+        .is_some_and(|value| value == "true")
+        && !headers.contains_key("hx-history-restore-request")
+}
+
+/// Extrator do sinal acima. Sem JavaScript (ou sem o header), tudo cai no
+/// caminho clássico de página cheia — htmx aqui é *progressive enhancement*.
+struct HxRequest(bool);
+
+impl<S: Send + Sync> FromRequestParts<S> for HxRequest {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Infallible> {
+        Ok(Self(is_partial_request(&parts.headers)))
+    }
 }
 
 #[derive(Template)]
@@ -303,14 +347,15 @@ async fn index(maybe_user: Option<User>) -> Redirect {
     }
 }
 
-#[derive(Template)]
-#[template(path = "assets.html")]
-struct AssetsPage {
+/// Tudo o que o miolo da carteira (o `<div id="wallet">`) precisa para se
+/// desenhar. É compartilhado pelos DOIS templates: a página completa
+/// (`assets.html`, que inclui o fragmento) e o fragmento sozinho
+/// (`wallet.html`), devolvido nas requisições parciais do htmx.
+struct WalletData {
     holdings: Vec<Holding>,
     available_assets: Vec<Asset>,
     transactions: Vec<Transaction>,
     summary: WalletSummary,
-    user: User,
     action: WalletAction,
     csrf_token: String,
     page: u32,
@@ -318,6 +363,42 @@ struct AssetsPage {
     has_next: bool,
     flash: Option<Flash>,
     chart: EquityChart,
+}
+
+impl WalletData {
+    fn new(
+        view: WalletView,
+        action: WalletAction,
+        csrf_token: String,
+        flash: Option<Flash>,
+    ) -> Self {
+        Self {
+            holdings: view.holdings,
+            available_assets: view.available_assets,
+            transactions: view.transactions,
+            summary: view.summary,
+            action,
+            csrf_token,
+            page: view.page,
+            has_prev: view.has_prev,
+            has_next: view.has_next,
+            flash,
+            chart: view.chart,
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "assets.html")]
+struct AssetsPage {
+    user: User,
+    wallet: WalletData,
+}
+
+#[derive(Template)]
+#[template(path = "wallet.html")]
+struct WalletFragment {
+    wallet: WalletData,
 }
 
 enum WalletAction {
@@ -338,9 +419,10 @@ async fn assets_page(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, WalletAction::None, &query).await
+    render_wallet(state, user, portfolio, jar, hx, WalletAction::None, &query).await
 }
 
 #[instrument(skip_all)]
@@ -349,9 +431,19 @@ async fn deposit_page(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, WalletAction::Deposit, &query).await
+    render_wallet(
+        state,
+        user,
+        portfolio,
+        jar,
+        hx,
+        WalletAction::Deposit,
+        &query,
+    )
+    .await
 }
 
 #[instrument(skip_all)]
@@ -360,9 +452,10 @@ async fn buy_page(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, WalletAction::Buy, &query).await
+    render_wallet(state, user, portfolio, jar, hx, WalletAction::Buy, &query).await
 }
 
 #[instrument(skip_all)]
@@ -371,18 +464,22 @@ async fn sell_page(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, WalletAction::Sell, &query).await
+    render_wallet(state, user, portfolio, jar, hx, WalletAction::Sell, &query).await
 }
 
 /// O handler só faz HTTP: garante o token CSRF, pede a visão pronta ao serviço
 /// e renderiza o template. Toda a montagem (consultas, paginação) é do serviço.
+/// Requisição parcial (htmx) recebe só o fragmento da carteira; navegação
+/// normal (e restauração de histórico) recebe a página completa.
 async fn render_wallet(
     state: AppState,
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     action: WalletAction,
     query: &PageQuery,
 ) -> Result<(CookieJar, Html<String>), AppError> {
@@ -392,22 +489,14 @@ async fn render_wallet(
     let view = portfolio
         .wallet_view(user.id(), query.page.unwrap_or(1))
         .await?;
+    let wallet = WalletData::new(view, action, csrf_token, flash);
 
-    let page = AssetsPage {
-        holdings: view.holdings,
-        available_assets: view.available_assets,
-        transactions: view.transactions,
-        summary: view.summary,
-        user,
-        action,
-        csrf_token,
-        page: view.page,
-        has_prev: view.has_prev,
-        has_next: view.has_next,
-        flash,
-        chart: view.chart,
+    let html = if hx.0 {
+        WalletFragment { wallet }.render()?
+    } else {
+        AssetsPage { user, wallet }.render()?
     };
-    Ok((jar, Html(page.render()?)))
+    Ok((jar, Html(html)))
 }
 
 #[derive(Deserialize)]
@@ -416,26 +505,58 @@ struct AmountForm {
     csrf_token: String,
 }
 
-/// Converte o desfecho de uma operação da carteira em redirect + flash: sucesso
-/// vira a mensagem dada, erro de negócio vira banner, erro interno propaga.
-/// Erro volta para `error_path` (a página do formulário de origem), para que o
-/// formulário re-renderize com o banner e o `autofocus` reposicione o foco.
-fn wallet_redirect(
-    jar: CookieJar,
-    outcome: Result<(), AppError>,
+/// Como apresentar o desfecho de uma operação da carteira: a mensagem de
+/// sucesso e, no erro de negócio, para qual formulário voltar (caminho + qual
+/// seção de formulário re-abrir), para o banner aparecer no lugar certo e o
+/// `autofocus` reposicionar o foco.
+struct OperationFeedback {
     on_success: Flash,
-    error_path: &str,
+    error_path: &'static str,
+    error_action: WalletAction,
+}
+
+/// Converte o desfecho de uma operação da carteira na resposta certa para cada
+/// modo. Sucesso vira a mensagem dada, erro de negócio vira banner, erro
+/// interno propaga.
+///
+/// - Clássico (sem JavaScript): flash em cookie + redirect — o padrão PRG de
+///   sempre, em duas requisições.
+/// - Parcial (htmx): o fragmento da carteira já atualizado volta NA MESMA
+///   resposta, com o flash inline (nada de cookie: a mensagem não deve
+///   sobreviver a um F5) e `HX-Push-Url` para a barra de endereço acompanhar.
+///   Uma requisição só, sem recarregar a página.
+async fn wallet_outcome(
     state: &AppState,
-) -> Result<(CookieJar, Redirect), AppError> {
-    let (flash, path) = match outcome {
-        Ok(()) => (on_success, "/assets"),
-        Err(error) => (business_flash(error)?, error_path),
+    user: User,
+    portfolio: &PortfolioService,
+    jar: CookieJar,
+    hx: HxRequest,
+    outcome: Result<(), AppError>,
+    feedback: OperationFeedback,
+) -> Result<Response, AppError> {
+    let (flash, path, action) = match outcome {
+        Ok(()) => (feedback.on_success, "/assets", WalletAction::None),
+        Err(error) => (
+            business_flash(error)?,
+            feedback.error_path,
+            feedback.error_action,
+        ),
     };
 
-    Ok((
-        set_flash(jar, &flash, state.config.cookie_secure),
-        Redirect::to(path),
-    ))
+    if hx.0 {
+        let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
+        let view = portfolio.wallet_view(user.id(), 1).await?;
+        let fragment = WalletFragment {
+            wallet: WalletData::new(view, action, csrf_token, Some(flash)),
+        };
+        Ok((jar, [("hx-push-url", path)], Html(fragment.render()?)).into_response())
+    } else {
+        Ok((
+            set_flash(jar, &flash, state.config.cookie_secure),
+            Redirect::to(path),
+        )
+            .into_response())
+    }
 }
 
 #[instrument(skip_all)]
@@ -444,21 +565,29 @@ async fn deposit(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Form(form): Form<AmountForm>,
-) -> Result<(CookieJar, Redirect), AppError> {
+) -> Result<Response, AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
         portfolio.deposit(user.id(), form.amount).await
     }
     .await;
 
-    wallet_redirect(
-        jar,
-        outcome,
-        Flash::success("depósito realizado."),
-        "/deposit",
+    wallet_outcome(
         &state,
+        user,
+        &portfolio,
+        jar,
+        hx,
+        outcome,
+        OperationFeedback {
+            on_success: Flash::success("depósito realizado."),
+            error_path: "/deposit",
+            error_action: WalletAction::Deposit,
+        },
     )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -474,21 +603,29 @@ async fn buy_asset(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Form(form): Form<TradeAssetForm>,
-) -> Result<(CookieJar, Redirect), AppError> {
+) -> Result<Response, AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
         portfolio.buy(user.id(), form.asset_id, form.quantity).await
     }
     .await;
 
-    wallet_redirect(
-        jar,
-        outcome,
-        Flash::success("compra realizada."),
-        "/buy",
+    wallet_outcome(
         &state,
+        user,
+        &portfolio,
+        jar,
+        hx,
+        outcome,
+        OperationFeedback {
+            on_success: Flash::success("compra realizada."),
+            error_path: "/buy",
+            error_action: WalletAction::Buy,
+        },
     )
+    .await
 }
 
 #[instrument(skip_all)]
@@ -497,8 +634,9 @@ async fn sell_asset(
     user: User,
     portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Form(form): Form<TradeAssetForm>,
-) -> Result<(CookieJar, Redirect), AppError> {
+) -> Result<Response, AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
         portfolio
@@ -507,13 +645,20 @@ async fn sell_asset(
     }
     .await;
 
-    wallet_redirect(
-        jar,
-        outcome,
-        Flash::success("venda realizada."),
-        "/sell",
+    wallet_outcome(
         &state,
+        user,
+        &portfolio,
+        jar,
+        hx,
+        outcome,
+        OperationFeedback {
+            on_success: Flash::success("venda realizada."),
+            error_path: "/sell",
+            error_action: WalletAction::Sell,
+        },
     )
+    .await
 }
 
 /// O formulário de sincronizar cotações não tem campo de dado nenhum, mas ainda
@@ -526,24 +671,33 @@ struct SyncQuotesForm {
 #[instrument(skip_all)]
 async fn sync_quotes(
     State(state): State<AppState>,
-    _user: User,
+    user: User,
     repository: Repository,
+    portfolio: PortfolioService,
     jar: CookieJar,
+    hx: HxRequest,
     Form(form): Form<SyncQuotesForm>,
-) -> Result<(CookieJar, Redirect), AppError> {
+) -> Result<Response, AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
         sync_quotes_round(&repository).await.map(|_| ())
     }
     .await;
 
-    wallet_redirect(
-        jar,
-        outcome,
-        Flash::success("cotações atualizadas."),
-        "/assets",
+    wallet_outcome(
         &state,
+        user,
+        &portfolio,
+        jar,
+        hx,
+        outcome,
+        OperationFeedback {
+            on_success: Flash::success("cotações atualizadas."),
+            error_path: "/assets",
+            error_action: WalletAction::None,
+        },
     )
+    .await
 }
 
 #[cfg(test)]
@@ -551,6 +705,71 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec;
     use time::macros::datetime;
+
+    #[test]
+    fn htmx_marks_partial_requests_but_history_restore_wants_the_full_page() {
+        let mut headers = HeaderMap::new();
+        assert!(!is_partial_request(&headers), "navegação normal");
+
+        headers.insert("hx-request", "true".parse().unwrap());
+        assert!(is_partial_request(&headers), "requisição do htmx");
+
+        // Voltar/avançar com o cache de histórico expirado: o htmx refaz o GET
+        // mas precisa da página inteira para reconstruir o DOM.
+        headers.insert("hx-history-restore-request", "true".parse().unwrap());
+        assert!(!is_partial_request(&headers), "restauração de histórico");
+    }
+
+    fn test_wallet() -> WalletData {
+        WalletData {
+            holdings: vec![],
+            available_assets: vec![],
+            transactions: vec![],
+            summary: WalletSummary {
+                balance: dec!(10),
+                holdings_value: Decimal::ZERO,
+                total_value: dec!(10),
+                total_invested: Decimal::ZERO,
+                total_delta: Decimal::ZERO,
+            },
+            action: WalletAction::None,
+            csrf_token: "tok".to_string(),
+            page: 1,
+            has_prev: false,
+            has_next: false,
+            flash: Some(Flash::success("depósito realizado.")),
+            chart: EquityChart::empty(),
+        }
+    }
+
+    #[test]
+    fn the_wallet_fragment_is_partial_html_embedded_by_the_full_page() {
+        let fragment = WalletFragment {
+            wallet: test_wallet(),
+        }
+        .render()
+        .expect("fragment renders");
+
+        // O fragmento é exatamente o alvo do swap (`outerHTML` de #wallet),
+        // com o flash inline — e nada de esqueleto de página em volta.
+        assert!(fragment.starts_with("<div id=\"wallet\">"));
+        assert!(!fragment.contains("<!DOCTYPE"));
+        assert!(fragment.contains("depósito realizado."));
+
+        let full = AssetsPage {
+            user: User::new(1, "breno".to_string(), "user".to_string()),
+            wallet: test_wallet(),
+        }
+        .render()
+        .expect("full page renders");
+
+        // A página completa embute o MESMO fragmento (id único do swap) dentro
+        // do esqueleto, com o htmx carregado do próprio binário.
+        assert!(full.contains("<!DOCTYPE html>"));
+        assert!(full.contains("<div id=\"wallet\">"));
+        assert!(full.contains("/static/htmx.js"));
+        assert_eq!(full.matches("id=\"wallet\"").count(), 1);
+    }
 
     #[test]
     fn csv_export_formats_the_statement_in_ptbr_conventions() {

@@ -112,5 +112,9 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
 - [x] Acessibilidade: erro de negócio volta ao formulário de origem com
   `autofocus` no primeiro campo, `aria-label` nos campos sem rótulo visível,
   anel de foco uniforme (`:focus-visible`) e *skip link* para o conteúdo.
-- [ ] Operações sem recarregar a página (HTML parcial/htmx), mantendo SSR.
+- [x] Operações sem recarregar a página, mantendo SSR: htmx (vendorado no
+  binário, CSP intacta) troca só o fragmento da carteira; requisições `HX-Request`
+  recebem o parcial com flash inline e `HX-Push-Url` numa resposta única, sem
+  JavaScript o fluxo clássico de redirect continua inteiro (*progressive
+  enhancement*).
 - [ ] Internacionalização dos templates (multi-idioma).

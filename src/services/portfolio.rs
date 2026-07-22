@@ -44,7 +44,8 @@ impl EquityChart {
         self.has_data
     }
 
-    fn empty() -> Self {
+    /// Gráfico vazio (também usado nos testes de renderização do front-end).
+    pub(crate) fn empty() -> Self {
         Self {
             points: String::new(),
             min_value: Decimal::ZERO,

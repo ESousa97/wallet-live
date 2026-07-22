@@ -17,6 +17,10 @@ operações **transacionais** e cotações de mercado reais.
   aplicada em um único `UPDATE` (sem N+1).
 - **Feedback nas operações** — sucessos e erros de negócio viram banners
   acessíveis em pt-BR (flash messages), nunca JSON cru na tela.
+- **Operações sem recarregar a página** — os formulários e a navegação da
+  carteira trocam só o fragmento HTML do miolo via **htmx** (servido do próprio
+  binário); sem JavaScript tudo continua funcionando pelo fluxo clássico de
+  redirect (*progressive enhancement*), e o servidor segue dono do HTML (SSR).
 - **Autenticação e sessão** — cadastro/login com hash de senha (argon2); sessão
   com **JWT de acesso curto** + **refresh token rotacionado e revogável**
   (logout mata a sessão no servidor), ambos em cookies `HttpOnly` +
@@ -44,6 +48,7 @@ operações **transacionais** e cotações de mercado reais.
 | Erros | Enum único (`AppError`) mapeado para status HTTP corretos; falhas 5xx são logadas com causa raiz e respondidas com mensagem genérica (nada de detalhe interno na resposta). |
 | Configuração | Lida e validada **uma vez** no boot (*fail-fast*): segredo ausente derruba o serviço com mensagem clara, não um 401 confuso em produção. |
 | Templates | Askama — variáveis dos templates também checadas em compilação. |
+| Interatividade | htmx com HTML parcial: a mesma visão da carteira renderiza a página inteira (`assets.html`) ou só o fragmento (`wallet.html`) conforme o header `HX-Request`; operações respondem o fragmento atualizado na própria resposta (uma requisição, flash inline, `HX-Push-Url`). Sem o header (sem JS, restauração de histórico), vale o PRG clássico. |
 
 ## Estrutura
 
@@ -70,6 +75,7 @@ src/
     api.rs           # API REST administrativa (JSON) + OpenAPI + testes de snapshot
     frontend.rs      # SSR: login/logout, carteira, operações, filtros Askama
 templates/           # base.html (esqueleto) + login.html + assets.html
+                     # + wallet.html (fragmento parcial trocado pelo htmx)
 migrations/          # schema versionado, up/down reversíveis
 ```
 
@@ -87,7 +93,8 @@ migrations/          # schema versionado, up/down reversíveis
 | `GET` | `/` | opcional | Com sessão vai para `/assets`; sem, para `/login` |
 | `GET` | `/assets` | sessão | Carteira: saldo, posições, resumo e extrato (paginado via `?page=`) |
 | `GET` | `/transactions.csv` | sessão | Download do extrato completo em CSV |
-| `GET` | `/static/tailwind.js` | — | Bundle CSS/JS servido do próprio binário (sem CDN) |
+| `GET` | `/static/tailwind.js` · `/static/htmx.js` | — | Bundles servidos do próprio binário (sem CDN) |
+| `GET` | `/deposit` · `/buy` · `/sell` | sessão | Carteira com o formulário da operação aberto |
 | `POST` | `/deposit` | sessão | Deposita saldo (`amount`) |
 | `POST` | `/buy` | sessão | Compra um ativo (`asset_id`, `quantity`) ao preço atual |
 | `POST` | `/sell` | sessão | Vende um ativo (`asset_id`, `quantity`) ao preço atual |
