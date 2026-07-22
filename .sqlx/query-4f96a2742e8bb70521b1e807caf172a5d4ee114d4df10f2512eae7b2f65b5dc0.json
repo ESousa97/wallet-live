@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                u.balance,\n                COALESCE(SUM(h.quantity * a.unit_value), 0) AS \"holdings_value!\",\n                u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0) AS \"total_value!\",\n                COALESCE(SUM(h.quantity * h.avg_cost), 0) AS \"total_invested!\",\n                COALESCE(SUM(h.quantity * (a.unit_value - h.avg_cost)), 0) AS \"total_delta!\"\n            FROM users u\n            LEFT JOIN holdings h ON h.user_id = u.id\n            LEFT JOIN assets a ON a.id = h.asset_id\n            WHERE u.id = $1\n            GROUP BY u.id, u.balance\n            ",
+  "query": "\n            SELECT\n                u.balance,\n                ROUND(COALESCE(SUM(h.quantity * a.unit_value), 0), 8) AS \"holdings_value!\",\n                ROUND(u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0), 8) AS \"total_value!\",\n                ROUND(COALESCE(SUM(h.quantity * h.avg_cost), 0), 8) AS \"total_invested!\",\n                ROUND(COALESCE(SUM(h.quantity * (a.unit_value - h.avg_cost)), 0), 8) AS \"total_delta!\"\n            FROM users u\n            LEFT JOIN holdings h ON h.user_id = u.id\n            LEFT JOIN assets a ON a.id = h.asset_id\n            WHERE u.id = $1\n            GROUP BY u.id, u.balance\n            ",
   "describe": {
     "columns": [
       {
@@ -52,5 +52,5 @@
       null
     ]
   },
-  "hash": "ef05d2429be6d3635dd9ef73b7e59b8a1c4e267ecae1b23edfcfa00688f5c5c0"
+  "hash": "4f96a2742e8bb70521b1e807caf172a5d4ee114d4df10f2512eae7b2f65b5dc0"
 }

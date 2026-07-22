@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                a.id,\n                a.name,\n                a.unit_value,\n                h.quantity AS \"quantity_owned!\",\n                h.avg_cost,\n                h.quantity * a.unit_value AS \"current_value!\",\n                h.quantity * h.avg_cost AS \"invested_value!\",\n                h.quantity * (a.unit_value - h.avg_cost) AS \"value_delta!\"\n            FROM holdings h\n            JOIN assets a ON a.id = h.asset_id\n            WHERE h.user_id = $1\n            ORDER BY a.id\n            ",
+  "query": "\n            SELECT\n                a.id,\n                a.name,\n                a.unit_value,\n                h.quantity AS \"quantity_owned!\",\n                h.avg_cost,\n                ROUND(h.quantity * a.unit_value, 8) AS \"current_value!\",\n                ROUND(h.quantity * h.avg_cost, 8) AS \"invested_value!\",\n                ROUND(h.quantity * (a.unit_value - h.avg_cost), 8) AS \"value_delta!\"\n            FROM holdings h\n            JOIN assets a ON a.id = h.asset_id\n            WHERE h.user_id = $1\n            ORDER BY a.id\n            ",
   "describe": {
     "columns": [
       {
@@ -93,5 +93,5 @@
       null
     ]
   },
-  "hash": "9a6eab8f6b086b093965648e6daffd30b612865e72fd79aa9ccb393f98b80585"
+  "hash": "4e2473759b7a731220212be325e85a0b6f49ebb7f043a13515ed9d18dcae5187"
 }

@@ -3,6 +3,14 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
+/// Escala canônica de dinheiro/preço: TODA gravação monetária arredonda para
+/// até 8 casas decimais (sub-centavo suficiente até para cripto). O invariante
+/// existe porque `NUMERIC` do Postgres é ilimitado, mas `rust_decimal::Decimal`
+/// tem 28 dígitos significativos: valores de escala alta (ex.: preço = 1/taxa
+/// com 28 casas) tornam PRODUTOS e SOMAS no SQL indecodificáveis na leitura
+/// (`value not representable`) — derrubando a tela da carteira.
+pub const MONEY_SCALE: u32 = 8;
+
 #[derive(Clone, Serialize, ToSchema)]
 pub struct Asset {
     pub id: i64,

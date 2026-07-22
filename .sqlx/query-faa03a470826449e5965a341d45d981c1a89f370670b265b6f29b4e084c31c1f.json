@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO holdings (user_id, asset_id, quantity, avg_cost)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (user_id, asset_id) DO UPDATE SET\n                avg_cost = ROUND(\n                    ((holdings.quantity * holdings.avg_cost) + (EXCLUDED.quantity * EXCLUDED.avg_cost))\n                        / (holdings.quantity + EXCLUDED.quantity),\n                    8),\n                quantity = holdings.quantity + EXCLUDED.quantity\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "faa03a470826449e5965a341d45d981c1a89f370670b265b6f29b4e084c31c1f"
+}

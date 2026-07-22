@@ -9,7 +9,8 @@ use sqlx::{PgPool, Postgres, Transaction as SqlxTransaction};
 use crate::app::AppState;
 use crate::error::AppError;
 use crate::models::{
-    Asset, Holding, PortfolioSnapshot, Transaction, UserIdentity, UserRecord, WalletSummary,
+    Asset, Holding, MONEY_SCALE, PortfolioSnapshot, Transaction, UserIdentity, UserRecord,
+    WalletSummary,
 };
 
 pub struct Repository {
@@ -226,16 +227,21 @@ impl Repository {
         Ok(())
     }
 
+    // Os agregados calculados no SQL (aqui, em `list_holdings` e no INSERT de
+    // snapshots) saem com ROUND(..., 8): produtos e somas de NUMERIC acumulam
+    // escala sem limite, e um resultado com mais de 28 dígitos significativos
+    // não é decodificável como `rust_decimal::Decimal` — a leitura falharia
+    // mesmo com cada coluna armazenada dentro do invariante de escala.
     pub async fn wallet_summary(&self, user_id: i64) -> sqlx::Result<WalletSummary> {
         sqlx::query_as!(
             WalletSummary,
             r#"
             SELECT
                 u.balance,
-                COALESCE(SUM(h.quantity * a.unit_value), 0) AS "holdings_value!",
-                u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0) AS "total_value!",
-                COALESCE(SUM(h.quantity * h.avg_cost), 0) AS "total_invested!",
-                COALESCE(SUM(h.quantity * (a.unit_value - h.avg_cost)), 0) AS "total_delta!"
+                ROUND(COALESCE(SUM(h.quantity * a.unit_value), 0), 8) AS "holdings_value!",
+                ROUND(u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0), 8) AS "total_value!",
+                ROUND(COALESCE(SUM(h.quantity * h.avg_cost), 0), 8) AS "total_invested!",
+                ROUND(COALESCE(SUM(h.quantity * (a.unit_value - h.avg_cost)), 0), 8) AS "total_delta!"
             FROM users u
             LEFT JOIN holdings h ON h.user_id = u.id
             LEFT JOIN assets a ON a.id = h.asset_id
@@ -258,9 +264,9 @@ impl Repository {
                 a.unit_value,
                 h.quantity AS "quantity_owned!",
                 h.avg_cost,
-                h.quantity * a.unit_value AS "current_value!",
-                h.quantity * h.avg_cost AS "invested_value!",
-                h.quantity * (a.unit_value - h.avg_cost) AS "value_delta!"
+                ROUND(h.quantity * a.unit_value, 8) AS "current_value!",
+                ROUND(h.quantity * h.avg_cost, 8) AS "invested_value!",
+                ROUND(h.quantity * (a.unit_value - h.avg_cost), 8) AS "value_delta!"
             FROM holdings h
             JOIN assets a ON a.id = h.asset_id
             WHERE h.user_id = $1
@@ -313,7 +319,7 @@ impl Repository {
         let result = sqlx::query!(
             r#"
             INSERT INTO portfolio_snapshots (user_id, total_value)
-            SELECT u.id, u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0)
+            SELECT u.id, ROUND(u.balance + COALESCE(SUM(h.quantity * a.unit_value), 0), 8)
             FROM users u
             LEFT JOIN holdings h ON h.user_id = u.id
             LEFT JOIN assets a ON a.id = h.asset_id
@@ -388,7 +394,10 @@ impl Repository {
     }
 
     pub async fn deposit(&self, user_id: i64, amount: Decimal) -> Result<(), AppError> {
-        if amount <= Decimal::ZERO {
+        // Depósito é dinheiro em BRL: centavos (2 casas) são a menor unidade,
+        // como o próprio formulário (`step="0.01"`) já sinaliza. Escala maior
+        // injetaria dígitos espúrios no saldo.
+        if amount <= Decimal::ZERO || amount.normalize().scale() > 2 {
             return Err(AppError::InvalidAmount);
         }
 
@@ -420,13 +429,16 @@ impl Repository {
         asset_id: i64,
         quantity: Decimal,
     ) -> Result<(), AppError> {
-        if quantity <= Decimal::ZERO {
+        if quantity <= Decimal::ZERO || quantity.normalize().scale() > MONEY_SCALE {
             return Err(AppError::InvalidAmount);
         }
 
         let mut tx = self.db.begin().await?;
         let asset = asset_for_update(&mut tx, asset_id).await?;
-        let cost = asset.unit_value * quantity;
+        // Arredonda o movimento de caixa para a escala canônica: preço e
+        // quantidade já são ≤ 8 casas, mas o produto pode chegar a 16 — e o
+        // saldo/extrato devem manter o invariante de `MONEY_SCALE`.
+        let cost = (asset.unit_value * quantity).round_dp(MONEY_SCALE);
 
         let user = sqlx::query!(
             "SELECT balance FROM users WHERE id = $1 FOR UPDATE",
@@ -452,8 +464,10 @@ impl Repository {
             INSERT INTO holdings (user_id, asset_id, quantity, avg_cost)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (user_id, asset_id) DO UPDATE SET
-                avg_cost = ((holdings.quantity * holdings.avg_cost) + (EXCLUDED.quantity * EXCLUDED.avg_cost))
-                    / (holdings.quantity + EXCLUDED.quantity),
+                avg_cost = ROUND(
+                    ((holdings.quantity * holdings.avg_cost) + (EXCLUDED.quantity * EXCLUDED.avg_cost))
+                        / (holdings.quantity + EXCLUDED.quantity),
+                    8),
                 quantity = holdings.quantity + EXCLUDED.quantity
             "#,
             user_id,
@@ -485,7 +499,7 @@ impl Repository {
         asset_id: i64,
         quantity: Decimal,
     ) -> Result<(), AppError> {
-        if quantity <= Decimal::ZERO {
+        if quantity <= Decimal::ZERO || quantity.normalize().scale() > MONEY_SCALE {
             return Err(AppError::InvalidAmount);
         }
 
@@ -505,7 +519,7 @@ impl Repository {
             return Err(AppError::InsufficientHoldings);
         }
 
-        let proceeds = asset.unit_value * quantity;
+        let proceeds = (asset.unit_value * quantity).round_dp(MONEY_SCALE);
 
         sqlx::query!(
             "UPDATE users SET balance = balance + $2 WHERE id = $1",
@@ -674,6 +688,99 @@ mod tests {
         ));
 
         assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(0));
+    }
+
+    #[sqlx::test]
+    async fn deposits_and_trades_reject_excessive_scale(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+
+        // Depósito é BRL: nada além de centavos.
+        assert!(matches!(
+            repo.deposit(uid, dec!(1.001)).await,
+            Err(AppError::InvalidAmount)
+        ));
+        // Zeros à direita não contam como escala (1.010 == 1.01).
+        repo.deposit(uid, dec!(1.010))
+            .await
+            .expect("trailing zero ok");
+
+        // Quantidade além da escala canônica (8) é rejeitada antes de tocar o
+        // banco — por isso nem precisa de ativo existente.
+        assert!(matches!(
+            repo.buy_asset(uid, 1, dec!(0.000000001)).await,
+            Err(AppError::InvalidAmount)
+        ));
+        assert!(matches!(
+            repo.sell_asset(uid, 1, dec!(0.000000001)).await,
+            Err(AppError::InvalidAmount)
+        ));
+    }
+
+    /// Regressão do incidente de 2026-07-22: preços de cotação gravados como
+    /// `1/taxa` SEM arredondar deixaram NUMERIC de escala 28 no banco;
+    /// produtos e somas desses valores passam dos 28 dígitos significativos do
+    /// `Decimal` e a LEITURA quebrava (`value not representable`) — /assets
+    /// respondia 500 para qualquer conta com posições. O estado patológico é
+    /// plantado por fora dos caminhos de escrita atuais (que já arredondam) e
+    /// as leituras têm de continuar decodificando, graças ao ROUND nas queries.
+    #[sqlx::test]
+    async fn legacy_high_scale_money_still_renders_the_wallet(db: PgPool) {
+        let repo = Repository::from(db.clone());
+        let uid = new_user(&repo, "esousa").await;
+        let aid = new_asset(&repo, "dolar", dec!(5)).await;
+
+        sqlx::query("UPDATE assets SET unit_value = 5.0661127716702973808196970465 WHERE id = $1")
+            .bind(aid)
+            .execute(&db)
+            .await
+            .unwrap();
+        // Espelha o que os fluxos antigos deixaram: valores que INDIVIDUALMENTE
+        // ainda cabem num Decimal (foram gravados por ele), mas cuja escala
+        // explode qualquer produto/soma no SQL.
+        sqlx::query("UPDATE users SET balance = 949.1847075186258425734544376 WHERE id = $1")
+            .bind(uid)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO holdings (user_id, asset_id, quantity, avg_cost) \
+             VALUES ($1, $2, 10, 5.0815292481374157426545562388)",
+        )
+        .bind(uid)
+        .bind(aid)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        // Sem o ROUND, cada uma destas leituras falhava com ColumnDecode.
+        let summary = repo.wallet_summary(uid).await.expect("summary decodes");
+        assert_eq!(summary.balance, dec!(949.1847075186258425734544376));
+        assert_eq!(summary.holdings_value, dec!(50.66112772));
+        assert_eq!(summary.total_value, dec!(999.84583524));
+
+        let holdings = repo.list_holdings(uid).await.expect("holdings decode");
+        assert_eq!(holdings[0].invested_value, dec!(50.81529248));
+
+        // O snapshot novo já nasce na escala canônica e o gráfico decodifica.
+        repo.record_portfolio_snapshots().await.expect("snapshot");
+        let snapshots = repo
+            .list_portfolio_snapshots(uid, 10)
+            .await
+            .expect("snapshots decode");
+        assert_eq!(snapshots.last().unwrap().total_value, dec!(999.84583524));
+
+        // Comprar mais ao preço legado mantém o custo médio dentro do
+        // invariante (ROUND no upsert), em vez de propagar a escala doente.
+        repo.deposit(uid, dec!(100)).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(1)).await.expect("buy");
+        let holdings = repo.list_holdings(uid).await.unwrap();
+        assert!(
+            holdings[0].avg_cost.scale() <= MONEY_SCALE,
+            "avg_cost escala {} > {}",
+            holdings[0].avg_cost.scale(),
+            MONEY_SCALE
+        );
     }
 
     #[sqlx::test]

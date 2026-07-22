@@ -42,7 +42,7 @@ operações **transacionais** e cotações de mercado reais.
 
 | Tema | Decisão |
 | --- | --- |
-| Dinheiro | `rust_decimal::Decimal` ↔ `NUMERIC` no Postgres. Ponto flutuante nunca toca valor monetário. |
+| Dinheiro | `rust_decimal::Decimal` ↔ `NUMERIC` no Postgres. Ponto flutuante nunca toca valor monetário. Escala canônica de **8 casas** em toda gravação (`MONEY_SCALE`) e `ROUND` nos agregados do SQL: `NUMERIC` é ilimitado, `Decimal` tem 28 dígitos significativos — sem o invariante, um preço vindo de `1/taxa` torna somas e produtos indecodificáveis na leitura. |
 | Consistência | Compra/venda/depósito rodam em transação com `FOR UPDATE`; saldo insuficiente reverte tudo. O schema tem `CHECK`s (saldo, preço e quantidade não negativos) como última linha de defesa. |
 | Modelo de dados | `holdings` materializa a posição atual por (usuário, ativo); `transactions` é o histórico imutável. Leituras triviais, escrita explícita. |
 | SQL | `sqlx::query_as!` — toda query é **checada em tempo de compilação** contra o banco. Schema divergente = não compila. |

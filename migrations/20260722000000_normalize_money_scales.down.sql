@@ -1,0 +1,3 @@
+-- Irreversível de propósito: os dígitos além da 8ª casa foram descartados e
+-- eram ruído da divisão sem arredondamento (não há valor de negócio a
+-- restaurar). Reverter é um no-op.

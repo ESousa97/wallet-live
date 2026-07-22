@@ -97,12 +97,17 @@ async fn fetch_brl_rates() -> Result<HashMap<String, Decimal>, AppError> {
 
 /// Preço em BRL de uma unidade da moeda `code`: o inverso da taxa BRL→moeda.
 /// Taxa ausente ou não positiva (não dá para inverter) vira `None`.
+///
+/// O arredondamento para `MONEY_SCALE` é OBRIGATÓRIO: a divisão de `Decimal`
+/// preenche a mantissa inteira (28 dígitos), e um preço com escala 28 gravado
+/// no banco torna os produtos/somas do resumo da carteira indecodificáveis na
+/// volta (foi exatamente o incidente do 500 em /assets).
 fn brl_price(rates: &HashMap<String, Decimal>, code: &str) -> Option<Decimal> {
     let rate = rates.get(code)?;
     if *rate <= Decimal::ZERO {
         return None;
     }
-    Some(Decimal::ONE / rate)
+    Some((Decimal::ONE / rate).round_dp(crate::models::MONEY_SCALE))
 }
 
 #[cfg(test)]
@@ -121,5 +126,24 @@ mod tests {
         // Taxa zero não é invertível; moeda desconhecida não existe.
         assert_eq!(brl_price(&rates, "ZERO"), None);
         assert_eq!(brl_price(&rates, "XYZ"), None);
+    }
+
+    #[test]
+    fn brl_price_caps_the_scale_of_non_terminating_inversions() {
+        let mut rates = HashMap::new();
+        // 1/3 é dízima: sem arredondar, a divisão de Decimal devolve 28 casas
+        // e o preço gravado explodiria a decodificação dos agregados no SQL.
+        rates.insert("USD".to_string(), dec!(3));
+        rates.insert("BTC".to_string(), dec!(0.0000029937));
+
+        for code in ["USD", "BTC"] {
+            let price = brl_price(&rates, code).expect("price");
+            assert!(
+                price.scale() <= crate::models::MONEY_SCALE,
+                "{code}: escala {} > {}",
+                price.scale(),
+                crate::models::MONEY_SCALE
+            );
+        }
     }
 }
