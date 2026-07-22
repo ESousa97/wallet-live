@@ -99,7 +99,7 @@ migrations/          # schema versionado, up/down reversíveis
 | `GET` | `/` | opcional | Com sessão vai para `/assets`; sem, para `/login` |
 | `GET` | `/assets` | sessão | Carteira: saldo, posições, resumo e extrato (paginado via `?page=`) |
 | `GET` | `/transactions.csv` | sessão | Download do extrato completo em CSV |
-| `GET` | `/static/tailwind.js` · `/static/htmx.js` | — | Bundles servidos do próprio binário (sem CDN) |
+| `GET` | `/static/app.css` · `/static/htmx.js` | — | Assets servidos do próprio binário (sem CDN) |
 | `GET` | `/deposit` · `/buy` · `/sell` | sessão | Carteira com o formulário da operação aberto |
 | `GET` | `/lang/{code}` | — | Troca o idioma da interface (`pt-BR`/`en`) e volta para `?next=` |
 | `POST` | `/deposit` | sessão | Deposita saldo (`amount`) |

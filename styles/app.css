@@ -1,0 +1,30 @@
+/* Fonte do CSS da interface. É compilado para `static/app.css` pelo CLI
+   standalone do Tailwind (um executável único — sem Node, sem npm, sem
+   cadeia de dependências de terceiros no build) e o resultado é versionado,
+   como o cache offline do SQLx. Regenerar:
+
+       ./tools/tailwindcss -i styles/app.css -o static/app.css --minify
+
+   Por que build-time e não o Play CDN: o CDN é um COMPILADOR que roda no
+   navegador (407 KB de JS por carregamento) e injeta `<style>` em runtime —
+   o que obrigava a CSP a carregar `style-src 'unsafe-inline'`, justamente a
+   diretiva que mais enfraquece uma política. Com o CSS estático, a CSP fecha
+   e o custo em JS cai a zero. */
+
+@import "tailwindcss";
+
+/* Onde procurar as classes usadas (o CSS gerado contém só o que os templates
+   realmente referenciam). */
+@source "../templates/**/*.html";
+
+/* Anel de foco uniforme para navegação por teclado; inputs e selects mantêm o
+   próprio tratamento via `focus:ring` do Tailwind. Vivia inline no
+   `base.html` — mudou de casa para que nenhuma tag `<style>` sobre na página
+   e o `'unsafe-inline'` possa sair da CSP. */
+@layer base {
+    a:focus-visible,
+    button:focus-visible {
+        outline: 2px solid var(--color-neutral-400);
+        outline-offset: 2px;
+    }
+}

@@ -44,9 +44,14 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   `Referrer-Policy` e HSTS quando atrás de HTTPS.
 - [x] TTLs de sessão configuráveis por ambiente (`SESSION_TTL_MINUTES`,
   `REFRESH_TTL_DAYS`).
-- [x] Ativos estáticos servidos localmente: o bundle do Tailwind é embutido no
-  binário e servido em `/static/tailwind.js` — zero requisições a terceiros e
-  `script-src 'self'` na CSP.
+- [x] Ativos estáticos servidos localmente: CSS e htmx são embutidos no binário
+  e servidos em `/static/` — zero requisições a terceiros.
+- [x] CSP sem `'unsafe-inline'`: o Tailwind saiu do Play CDN (um compilador de
+  407 KB que rodava no navegador e injetava `<style>` em runtime) para CSS
+  pré-compilado em build-time pelo CLI standalone — sem Node e sem npm, então
+  o projeto segue com zero dependências JS na cadeia de build. `script-src` e
+  `style-src` fecham em `'self'`, com teste travando o invariante de que
+  nenhuma página emite `<style>`/`<script>` inline.
 
 ## 🏗️ Fase 3 — Arquitetura e API
 

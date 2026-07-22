@@ -369,12 +369,12 @@ fn new_request_id() -> String {
 
 /// Cabeçalhos de segurança aplicados a toda resposta:
 ///
-/// - **CSP** restringe de onde a página pode carregar código/estilo: scripts
-///   apenas do próprio site (o Tailwind é servido pelo binário em
-///   `/static/tailwind.js`); `style-src 'unsafe-inline'` porque esse bundle
-///   injeta `<style>` em runtime; `frame-ancestors 'none'` bloqueia
-///   clickjacking; `form-action 'self'` impede formulários de postarem para
-///   fora.
+/// - **CSP** restringe de onde a página pode carregar código/estilo: script E
+///   estilo apenas do próprio site — o CSS é pré-compilado e servido pelo
+///   binário em `/static/app.css`, então NÃO há `<style>` inline na página e
+///   `style-src` fecha em `'self'` (sem `'unsafe-inline'`, a diretiva que mais
+///   enfraquece uma política); `frame-ancestors 'none'` bloqueia clickjacking;
+///   `form-action 'self'` impede formulários de postarem para fora.
 /// - **nosniff** impede o navegador de "adivinhar" content-type.
 /// - **Referrer-Policy** não vaza URLs internas para sites de destino.
 /// - **HSTS** só quando o serviço está atrás de HTTPS (mesmo sinal do cookie
@@ -387,7 +387,7 @@ async fn security_headers(State(state): State<AppState>, request: Request, next:
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
             "default-src 'self'; script-src 'self'; \
-             style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
+             style-src 'self'; img-src 'self' data:; \
              connect-src 'self'; frame-ancestors 'none'; form-action 'self'; \
              base-uri 'self'; object-src 'none'",
         ),

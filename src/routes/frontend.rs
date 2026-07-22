@@ -30,7 +30,7 @@ use crate::services::portfolio::{EquityChart, PortfolioService, WalletView};
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(index))
-        .route("/static/tailwind.js", get(tailwind_js))
+        .route("/static/app.css", get(app_css))
         .route("/static/htmx.js", get(htmx_js))
         .route("/login", get(login_page).post(login))
         .route("/register", get(register_page).post(register))
@@ -76,19 +76,23 @@ fn sanitized_next(next: Option<&str>) -> &str {
     }
 }
 
-/// Tailwind servido do próprio binário (`include_str!` embute o bundle em tempo
-/// de compilação, como o askama faz com os templates): nada de CDN de terceiros
-/// — sem dependência externa em runtime, sem telemetria alheia, e a CSP pode
-/// travar `script-src` em `'self'`.
+/// CSS da interface, servido do próprio binário (`include_str!` embute o
+/// arquivo em tempo de compilação, como o askama faz com os templates): nada de
+/// CDN de terceiros — sem dependência externa em runtime, sem telemetria
+/// alheia, e a CSP trava `style-src` em `'self'`.
+///
+/// É CSS **pré-compilado** (ver `styles/app.css`), não o Play CDN do Tailwind:
+/// aquele era um compilador rodando no navegador, que injetava `<style>` em
+/// runtime e por isso exigia `'unsafe-inline'` na política.
 #[instrument(skip_all)]
-async fn tailwind_js() -> impl axum::response::IntoResponse {
+async fn app_css() -> impl axum::response::IntoResponse {
     (
         [
-            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
             // Um dia de cache: o arquivo só muda quando o binário muda.
             (header::CACHE_CONTROL, "public, max-age=86400"),
         ],
-        include_str!("../../static/tailwind.js"),
+        include_str!("../../static/app.css"),
     )
 }
 
@@ -903,6 +907,41 @@ mod tests {
         assert!(full.contains("<div id=\"wallet\">"));
         assert!(full.contains("/static/htmx.js"));
         assert_eq!(full.matches("id=\"wallet\"").count(), 1);
+    }
+
+    /// A CSP fecha `script-src` e `style-src` em `'self'` (nada de
+    /// `'unsafe-inline'`). Isso só se sustenta enquanto NENHUMA página emitir
+    /// `<style>` ou `<script>` inline — um bloco desses passaria despercebido
+    /// em revisão e o navegador simplesmente o ignoraria em produção, gerando
+    /// um bug visual difícil de rastrear. O teste trava o invariante.
+    #[test]
+    fn pages_carry_no_inline_style_or_script() {
+        let full = AssetsPage {
+            user: User::new(1, "breno".to_string(), "user".to_string()),
+            wallet: test_wallet(Locale::PtBr),
+            t: Locale::PtBr.strings(),
+        }
+        .render()
+        .expect("page renders");
+
+        let login = LoginPage {
+            is_register: false,
+            csrf_token: "tok".to_string(),
+            flash: None,
+            t: Locale::PtBr.strings(),
+        }
+        .render()
+        .expect("login renders");
+
+        for (name, html) in [("assets", &full), ("login", &login)] {
+            assert!(!html.contains("<style"), "{name}: <style> inline");
+            // Todo `<script>` da página tem de ser externo (`src=`).
+            for fragment in html.split("<script").skip(1) {
+                let tag = fragment.split('>').next().unwrap_or_default();
+                assert!(tag.contains("src="), "{name}: <script> sem src ({tag})");
+            }
+            assert!(html.contains("/static/app.css"), "{name}: css externo");
+        }
     }
 
     #[test]

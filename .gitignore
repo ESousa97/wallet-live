@@ -9,3 +9,6 @@
 # CAs específicos da máquina para o build Docker (ver docker/extra-ca/README.md).
 docker/extra-ca/*.crt
 docker/extra-ca/*.cer
+
+# CLI standalone do Tailwind (baixado sob demanda; ver styles/app.css)
+/tools/

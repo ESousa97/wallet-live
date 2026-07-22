@@ -30,6 +30,18 @@ jobs:
         run: cargo fmt --all --check
       - name: clippy (warnings são erro)
         run: cargo clippy --all-targets -- -D warnings
+      # Mesma ideia do `sqlx prepare --check`: o CSS compilado é versionado
+      # (o binário o embute), então precisa provar que não descolou dos
+      # templates. Classe nova usada sem recompilar = estilo faltando em
+      # produção, e nada no build de Rust perceberia.
+      - name: css compilado em dia com os templates
+        run: |
+          curl -fsSL -o tailwindcss \
+            https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-x64
+          chmod +x tailwindcss
+          ./tailwindcss -i styles/app.css -o /tmp/app.css --minify
+          diff -q /tmp/app.css static/app.css \
+            || { echo "::error::static/app.css desatualizado — rode: tailwindcss -i styles/app.css -o static/app.css --minify"; exit 1; }
 
   test:
     runs-on: ubuntu-latest
