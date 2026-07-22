@@ -11,23 +11,23 @@
 
     <section id="conteudo" tabindex="-1" class="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-neutral-800 bg-neutral-800 outline-none sm:grid-cols-5">
         <div class="bg-neutral-900/90 px-5 py-4">
-            <p class="text-xs text-neutral-500">saldo</p>
+            <p class="text-xs text-neutral-500">{{ wallet.t.sum_balance }}</p>
             <p class="mt-1 text-lg font-semibold tabular-nums">{{ wallet.summary.balance|money }}</p>
         </div>
         <div class="bg-neutral-900/90 px-5 py-4">
-            <p class="text-xs text-neutral-500">ativos</p>
+            <p class="text-xs text-neutral-500">{{ wallet.t.sum_holdings }}</p>
             <p class="mt-1 text-lg font-semibold tabular-nums">{{ wallet.summary.holdings_value|money }}</p>
         </div>
         <div class="bg-neutral-900/90 px-5 py-4">
-            <p class="text-xs text-neutral-500">patrimônio</p>
+            <p class="text-xs text-neutral-500">{{ wallet.t.sum_net_worth }}</p>
             <p class="mt-1 text-lg font-semibold tabular-nums">{{ wallet.summary.total_value|money }}</p>
         </div>
         <div class="bg-neutral-900/90 px-5 py-4">
-            <p class="text-xs text-neutral-500">investido</p>
+            <p class="text-xs text-neutral-500">{{ wallet.t.sum_invested }}</p>
             <p class="mt-1 text-lg font-semibold tabular-nums">{{ wallet.summary.total_invested|money }}</p>
         </div>
         <div class="bg-neutral-900/90 px-5 py-4">
-            <p class="text-xs text-neutral-500">resultado dos ativos</p>
+            <p class="text-xs text-neutral-500">{{ wallet.t.sum_result }}</p>
             {% if wallet.summary.total_delta|nonnegative %}
             <p class="mt-1 text-lg font-semibold tabular-nums text-emerald-400">+{{ wallet.summary.total_delta|money }}</p>
             {% else %}
@@ -38,14 +38,14 @@
 
     {% if wallet.chart.has_data() %}
     <section class="mb-8 rounded-lg border border-neutral-800 bg-neutral-900/70 p-5">
-        <h2 class="mb-3 text-sm font-semibold text-neutral-300">evolução do patrimônio</h2>
-        <svg viewBox="0 0 100 32" preserveAspectRatio="none" class="h-24 w-full" role="img" aria-label="gráfico da evolução do patrimônio ao longo das últimas atualizações de cotação">
+        <h2 class="mb-3 text-sm font-semibold text-neutral-300">{{ wallet.t.chart_title }}</h2>
+        <svg viewBox="0 0 100 32" preserveAspectRatio="none" class="h-24 w-full" role="img" aria-label="{{ wallet.t.chart_aria }}">
             <polyline points="{{ wallet.chart.points }}" fill="none" stroke="#34d399" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
         </svg>
         <div class="mt-2 flex items-center justify-between text-xs tabular-nums text-neutral-500">
-            <span>mín {{ wallet.chart.min_value|money }}</span>
-            <span class="text-neutral-300">último {{ wallet.chart.latest_value|money }}</span>
-            <span>máx {{ wallet.chart.max_value|money }}</span>
+            <span>{{ wallet.t.chart_min }} {{ wallet.chart.min_value|money }}</span>
+            <span class="text-neutral-300">{{ wallet.t.chart_latest }} {{ wallet.chart.latest_value|money }}</span>
+            <span>{{ wallet.t.chart_max }} {{ wallet.chart.max_value|money }}</span>
         </div>
     </section>
     {% endif %}
@@ -53,41 +53,41 @@
     {% match wallet.action %}
     {% when WalletAction::Deposit %}
     <section class="mb-8 rounded-lg border border-neutral-800 bg-neutral-900/70 p-5">
-        <h2 class="mb-4 text-base font-semibold">depositar saldo</h2>
+        <h2 class="mb-4 text-base font-semibold">{{ wallet.t.deposit_title }}</h2>
         <form method="post" action="/deposit" hx-post="/deposit" hx-target="#wallet" hx-swap="outerHTML" class="flex flex-col gap-3 sm:flex-row">
             <input type="hidden" name="csrf_token" value="{{ wallet.csrf_token }}" />
-            <input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required autofocus aria-label="valor do depósito em reais" placeholder="valor em R$" class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
-            <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">confirmar</button>
+            <input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required autofocus aria-label="{{ wallet.t.deposit_amount_aria }}" placeholder="{{ wallet.t.deposit_placeholder }}" class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
+            <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">{{ wallet.t.confirm }}</button>
         </form>
     </section>
     {% when WalletAction::Buy %}
     <section class="mb-8 rounded-lg border border-neutral-800 bg-neutral-900/70 p-5">
-        <h2 class="mb-4 text-base font-semibold">comprar ativo</h2>
+        <h2 class="mb-4 text-base font-semibold">{{ wallet.t.buy_title }}</h2>
         <form method="post" action="/buy" hx-post="/buy" hx-target="#wallet" hx-swap="outerHTML" class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <input type="hidden" name="csrf_token" value="{{ wallet.csrf_token }}" />
-            <select name="asset_id" required autofocus aria-label="ativo para comprar" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
-                <option value="" disabled selected>selecione um ativo</option>
+            <select name="asset_id" required autofocus aria-label="{{ wallet.t.buy_select_aria }}" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
+                <option value="" disabled selected>{{ wallet.t.select_asset }}</option>
                 {% for asset in wallet.available_assets %}
                 <option value="{{ asset.id }}">{{ asset.name }} @ {{ asset.unit_value|money }}</option>
                 {% endfor %}
             </select>
-            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="quantidade" aria-label="quantidade a comprar" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
-            <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">comprar</button>
+            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="{{ wallet.t.quantity }}" aria-label="{{ wallet.t.buy_qty_aria }}" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
+            <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">{{ wallet.t.nav_buy }}</button>
         </form>
     </section>
     {% when WalletAction::Sell %}
     <section class="mb-8 rounded-lg border border-neutral-800 bg-neutral-900/70 p-5">
-        <h2 class="mb-4 text-base font-semibold">vender ativo</h2>
+        <h2 class="mb-4 text-base font-semibold">{{ wallet.t.sell_title }}</h2>
         <form method="post" action="/sell" hx-post="/sell" hx-target="#wallet" hx-swap="outerHTML" class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <input type="hidden" name="csrf_token" value="{{ wallet.csrf_token }}" />
-            <select name="asset_id" required autofocus aria-label="posição para vender" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
-                <option value="" disabled selected>selecione uma posição</option>
+            <select name="asset_id" required autofocus aria-label="{{ wallet.t.sell_select_aria }}" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600">
+                <option value="" disabled selected>{{ wallet.t.select_position }}</option>
                 {% for holding in wallet.holdings %}
-                <option value="{{ holding.id }}">{{ holding.name }} disponível: {{ holding.quantity_owned|quantity }}</option>
+                <option value="{{ holding.id }}">{{ holding.name }} {{ wallet.t.available }} {{ holding.quantity_owned|quantity }}</option>
                 {% endfor %}
             </select>
-            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="quantidade" aria-label="quantidade a vender" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
-            <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">vender</button>
+            <input name="quantity" type="number" inputmode="decimal" step="any" min="0.00000001" required placeholder="{{ wallet.t.quantity }}" aria-label="{{ wallet.t.sell_qty_aria }}" class="rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600" />
+            <button class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900">{{ wallet.t.nav_sell }}</button>
         </form>
     </section>
     {% when WalletAction::None %}
@@ -95,23 +95,23 @@
 
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_22rem]">
         <section>
-            <h2 class="mb-3 text-sm font-semibold text-neutral-300">posições</h2>
+            <h2 class="mb-3 text-sm font-semibold text-neutral-300">{{ wallet.t.positions }}</h2>
             {% if wallet.holdings.is_empty() %}
             <div class="rounded-lg border border-dashed border-neutral-800 px-6 py-14 text-center">
-                <p class="text-sm text-neutral-400">nenhum ativo ainda.</p>
-                <p class="mt-1 text-sm text-neutral-500">deposite saldo e compre seu primeiro ativo.</p>
+                <p class="text-sm text-neutral-400">{{ wallet.t.empty_title }}</p>
+                <p class="mt-1 text-sm text-neutral-500">{{ wallet.t.empty_hint }}</p>
             </div>
             {% else %}
             <div class="overflow-hidden rounded-lg border border-neutral-800">
                 <table class="w-full text-sm tabular-nums">
                     <thead class="bg-neutral-900 text-xs text-neutral-500">
                         <tr>
-                            <th class="px-4 py-3 text-left font-medium">ativo</th>
-                            <th class="px-4 py-3 text-right font-medium">quantidade</th>
-                            <th class="px-4 py-3 text-right font-medium">preço</th>
-                            <th class="px-4 py-3 text-right font-medium">médio</th>
-                            <th class="px-4 py-3 text-right font-medium">valor</th>
-                            <th class="px-4 py-3 text-right font-medium">resultado</th>
+                            <th class="px-4 py-3 text-left font-medium">{{ wallet.t.th_asset }}</th>
+                            <th class="px-4 py-3 text-right font-medium">{{ wallet.t.quantity }}</th>
+                            <th class="px-4 py-3 text-right font-medium">{{ wallet.t.th_price }}</th>
+                            <th class="px-4 py-3 text-right font-medium">{{ wallet.t.th_avg }}</th>
+                            <th class="px-4 py-3 text-right font-medium">{{ wallet.t.th_value }}</th>
+                            <th class="px-4 py-3 text-right font-medium">{{ wallet.t.th_result }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -137,18 +137,18 @@
 
         <aside>
             <div class="mb-3 flex items-center justify-between">
-                <h2 class="text-sm font-semibold text-neutral-300">últimas transações</h2>
-                <a href="/transactions.csv" class="text-xs text-neutral-400 underline underline-offset-4 transition hover:text-white">exportar csv</a>
+                <h2 class="text-sm font-semibold text-neutral-300">{{ wallet.t.tx_title }}</h2>
+                <a href="/transactions.csv" class="text-xs text-neutral-400 underline underline-offset-4 transition hover:text-white">{{ wallet.t.export_csv }}</a>
             </div>
             <div class="rounded-lg border border-neutral-800">
                 {% if wallet.transactions.is_empty() %}
-                <p class="px-4 py-6 text-sm text-neutral-500">sem movimentações.</p>
+                <p class="px-4 py-6 text-sm text-neutral-500">{{ wallet.t.no_tx }}</p>
                 {% else %}
                 {% for tx in wallet.transactions %}
                 <div class="border-t border-neutral-800 px-4 py-3 first:border-t-0 tx-row">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <p class="text-sm font-medium">{{ tx.kind|transaction_kind }}{% match tx.asset_name %}{% when Some with (name) %} · {{ name }}{% when None %}{% endmatch %}</p>
+                            <p class="text-sm font-medium">{{ wallet.t.tx_kind(tx.kind.as_str()) }}{% match tx.asset_name %}{% when Some with (name) %} · {{ name }}{% when None %}{% endmatch %}</p>
                             <p class="mt-0.5 text-xs text-neutral-500">{{ tx.created_at|human_datetime }}</p>
                         </div>
                         {% if tx.kind == "buy" %}
@@ -161,7 +161,7 @@
                     </div>
                     {% match tx.quantity %}
                     {% when Some with (quantity) %}
-                    <p class="mt-1 text-xs text-neutral-500">{{ quantity|quantity }} un. @ {% match tx.unit_value %}{% when Some with (unit_value) %}{{ unit_value|money }}{% when None %}-{% endmatch %}</p>
+                    <p class="mt-1 text-xs text-neutral-500">{{ quantity|quantity }} {{ wallet.t.units_at }} {% match tx.unit_value %}{% when Some with (unit_value) %}{{ unit_value|money }}{% when None %}-{% endmatch %}</p>
                     {% when None %}
                     {% endmatch %}
                 </div>
@@ -169,15 +169,15 @@
                 {% endif %}
             </div>
             {% if wallet.has_prev || wallet.has_next %}
-            <nav aria-label="páginas do extrato" class="mt-2 flex items-center justify-between text-xs">
+            <nav aria-label="{{ wallet.t.pages_aria }}" class="mt-2 flex items-center justify-between text-xs">
                 {% if wallet.has_prev %}
-                <a href="/assets?page={{ wallet.page - 1 }}" hx-get="/assets?page={{ wallet.page - 1 }}" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded px-2 py-1 text-neutral-400 underline underline-offset-4 transition hover:text-white">‹ mais recentes</a>
+                <a href="/assets?page={{ wallet.page - 1 }}" hx-get="/assets?page={{ wallet.page - 1 }}" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded px-2 py-1 text-neutral-400 underline underline-offset-4 transition hover:text-white">{{ wallet.t.newer }}</a>
                 {% else %}
                 <span></span>
                 {% endif %}
-                <span class="text-neutral-600">página {{ wallet.page }}</span>
+                <span class="text-neutral-600">{{ wallet.t.page_label }} {{ wallet.page }}</span>
                 {% if wallet.has_next %}
-                <a href="/assets?page={{ wallet.page + 1 }}" hx-get="/assets?page={{ wallet.page + 1 }}" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded px-2 py-1 text-neutral-400 underline underline-offset-4 transition hover:text-white">mais antigas ›</a>
+                <a href="/assets?page={{ wallet.page + 1 }}" hx-get="/assets?page={{ wallet.page + 1 }}" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded px-2 py-1 text-neutral-400 underline underline-offset-4 transition hover:text-white">{{ wallet.t.older }}</a>
                 {% else %}
                 <span></span>
                 {% endif %}

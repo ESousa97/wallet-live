@@ -21,6 +21,10 @@ operações **transacionais** e cotações de mercado reais.
   carteira trocam só o fragmento HTML do miolo via **htmx** (servido do próprio
   binário); sem JavaScript tudo continua funcionando pelo fluxo clássico de
   redirect (*progressive enhancement*), e o servidor segue dono do HTML (SSR).
+- **Interface multi-idioma** — pt-BR e inglês, escolhidos pelo seletor da
+  interface (cookie) ou pelo `Accept-Language` do navegador; mensagens de
+  feedback acompanham o idioma. Moeda e datas ficam na convenção do dado (BRL),
+  não da interface.
 - **Autenticação e sessão** — cadastro/login com hash de senha (argon2); sessão
   com **JWT de acesso curto** + **refresh token rotacionado e revogável**
   (logout mata a sessão no servidor), ambos em cookies `HttpOnly` +
@@ -49,6 +53,7 @@ operações **transacionais** e cotações de mercado reais.
 | Configuração | Lida e validada **uma vez** no boot (*fail-fast*): segredo ausente derruba o serviço com mensagem clara, não um 401 confuso em produção. |
 | Templates | Askama — variáveis dos templates também checadas em compilação. |
 | Interatividade | htmx com HTML parcial: a mesma visão da carteira renderiza a página inteira (`assets.html`) ou só o fragmento (`wallet.html`) conforme o header `HX-Request`; operações respondem o fragmento atualizado na própria resposta (uma requisição, flash inline, `HX-Push-Url`). Sem o header (sem JS, restauração de histórico), vale o PRG clássico. |
+| i18n | Catálogo tipado (`i18n::Strings`, uma `const` por idioma): texto faltando é erro de compilação, e o askama checa os campos usados nos templates. Resolução: cookie `lang` > `Accept-Language` > pt-BR. |
 
 ## Estrutura
 
@@ -58,6 +63,7 @@ src/
   app.rs             # boot, AppState { db, config, ... }, /health, shutdown gracioso,
                      # tracing + métricas (exportação OTLP opcional)
   config.rs          # Config: lê e valida o ambiente uma vez (fail-fast)
+  i18n.rs            # idiomas da interface (pt-BR/en): catálogo tipado + extrator
   models.rs          # Asset, UserRecord, WalletSummary, Holding, Transaction
   error.rs           # AppError + IntoResponse (status HTTP, censura de 5xx)
   quotes.rs          # cotações de mercado (Coinbase) -> preços dos ativos
@@ -95,6 +101,7 @@ migrations/          # schema versionado, up/down reversíveis
 | `GET` | `/transactions.csv` | sessão | Download do extrato completo em CSV |
 | `GET` | `/static/tailwind.js` · `/static/htmx.js` | — | Bundles servidos do próprio binário (sem CDN) |
 | `GET` | `/deposit` · `/buy` · `/sell` | sessão | Carteira com o formulário da operação aberto |
+| `GET` | `/lang/{code}` | — | Troca o idioma da interface (`pt-BR`/`en`) e volta para `?next=` |
 | `POST` | `/deposit` | sessão | Deposita saldo (`amount`) |
 | `POST` | `/buy` | sessão | Compra um ativo (`asset_id`, `quantity`) ao preço atual |
 | `POST` | `/sell` | sessão | Vende um ativo (`asset_id`, `quantity`) ao preço atual |

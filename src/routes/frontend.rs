@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use askama::Template;
 use axum::Router;
-use axum::extract::{Form, FromRequestParts, Query, State};
+use axum::extract::{Form, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -20,6 +20,7 @@ use crate::auth::session::{
 use crate::auth::user::{TOKEN_COOKIE, UnauthenticatedUser, User};
 use crate::config::Config;
 use crate::error::AppError;
+use crate::i18n::{Locale, Strings, lang_cookie};
 use crate::models::{Asset, Holding, Transaction, WalletSummary};
 use crate::quotes::sync_quotes_round;
 use crate::repository::Repository;
@@ -40,6 +41,39 @@ pub fn router() -> Router<AppState> {
         .route("/buy", get(buy_page).post(buy_asset))
         .route("/sell", get(sell_page).post(sell_asset))
         .route("/quotes/sync", get(assets_page).post(sync_quotes))
+        .route("/lang/{code}", get(set_language))
+}
+
+#[derive(Deserialize)]
+struct LangQuery {
+    next: Option<String>,
+}
+
+/// Troca o idioma da interface: grava o cookie `lang` e volta para a página de
+/// origem (`?next=`). Código desconhecido não grava nada — só redireciona.
+#[instrument(skip_all)]
+async fn set_language(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    jar: CookieJar,
+    Query(query): Query<LangQuery>,
+) -> (CookieJar, Redirect) {
+    let jar = match Locale::from_tag(&code) {
+        Some(locale) => jar.add(lang_cookie(locale, state.config.cookie_secure)),
+        None => jar,
+    };
+
+    (jar, Redirect::to(sanitized_next(query.next.as_deref())))
+}
+
+/// Valida o destino do retorno pós-troca de idioma: só caminhos locais
+/// absolutos ("/algo"). Nada de "//host" (URL relativa a protocolo) nem URLs
+/// completas — um `next` vindo da query string nunca vira open redirect.
+fn sanitized_next(next: Option<&str>) -> &str {
+    match next {
+        Some(path) if path.starts_with('/') && !path.starts_with("//") => path,
+        _ => "/",
+    }
 }
 
 /// Tailwind servido do próprio binário (`include_str!` embute o bundle em tempo
@@ -104,6 +138,19 @@ struct LoginPage {
     is_register: bool,
     csrf_token: String,
     flash: Option<Flash>,
+    t: &'static Strings,
+}
+
+impl LoginPage {
+    /// Caminho desta tela (login ou cadastro): destino do formulário e retorno
+    /// (`?next=`) da troca de idioma.
+    fn form_path(&self) -> &'static str {
+        if self.is_register {
+            "/register"
+        } else {
+            "/login"
+        }
+    }
 }
 
 /// Toda página com formulário garante um token CSRF na jar e o embute num campo
@@ -113,6 +160,7 @@ struct LoginPage {
 async fn login_page(
     State(state): State<AppState>,
     jar: CookieJar,
+    locale: Locale,
 ) -> Result<(CookieJar, Html<String>), AppError> {
     let (jar, flash) = take_flash(jar);
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
@@ -120,6 +168,7 @@ async fn login_page(
         is_register: false,
         csrf_token,
         flash,
+        t: locale.strings(),
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -128,6 +177,7 @@ async fn login_page(
 async fn register_page(
     State(state): State<AppState>,
     jar: CookieJar,
+    locale: Locale,
 ) -> Result<(CookieJar, Html<String>), AppError> {
     let (jar, flash) = take_flash(jar);
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
@@ -135,6 +185,7 @@ async fn register_page(
         is_register: true,
         csrf_token,
         flash,
+        t: locale.strings(),
     };
     Ok((jar, Html(page.render()?)))
 }
@@ -151,6 +202,7 @@ async fn login(
     State(state): State<AppState>,
     repository: Repository,
     jar: CookieJar,
+    locale: Locale,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
     match authenticate_form(&state, &repository, &jar, form).await {
@@ -161,7 +213,7 @@ async fn login(
         // Erro de negócio vira banner na própria tela de login; erro interno
         // propaga (o `?` do business_flash) para o fluxo de 500.
         Err(error) => {
-            let flash = business_flash(error)?;
+            let flash = business_flash(error, locale.strings())?;
             Ok((
                 set_flash(jar, &flash, state.config.cookie_secure),
                 Redirect::to("/login"),
@@ -206,6 +258,7 @@ async fn register(
     State(state): State<AppState>,
     repository: Repository,
     jar: CookieJar,
+    locale: Locale,
     Form(form): Form<LoginForm>,
 ) -> Result<(CookieJar, Redirect), AppError> {
     let outcome = async {
@@ -222,7 +275,7 @@ async fn register(
             Ok((jar, Redirect::to("/")))
         }
         Err(error) => {
-            let flash = business_flash(error)?;
+            let flash = business_flash(error, locale.strings())?;
             Ok((
                 set_flash(jar, &flash, state.config.cookie_secure),
                 Redirect::to("/register"),
@@ -363,6 +416,7 @@ struct WalletData {
     has_next: bool,
     flash: Option<Flash>,
     chart: EquityChart,
+    t: &'static Strings,
 }
 
 impl WalletData {
@@ -371,6 +425,7 @@ impl WalletData {
         action: WalletAction,
         csrf_token: String,
         flash: Option<Flash>,
+        locale: Locale,
     ) -> Self {
         Self {
             holdings: view.holdings,
@@ -384,6 +439,7 @@ impl WalletData {
             has_next: view.has_next,
             flash,
             chart: view.chart,
+            t: locale.strings(),
         }
     }
 }
@@ -393,6 +449,7 @@ impl WalletData {
 struct AssetsPage {
     user: User,
     wallet: WalletData,
+    t: &'static Strings,
 }
 
 #[derive(Template)]
@@ -420,9 +477,20 @@ async fn assets_page(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, hx, WalletAction::None, &query).await
+    render_wallet(RenderWallet {
+        state,
+        user,
+        portfolio,
+        jar,
+        hx,
+        locale,
+        action: WalletAction::None,
+        page: query.page,
+    })
+    .await
 }
 
 #[instrument(skip_all)]
@@ -432,17 +500,19 @@ async fn deposit_page(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(
+    render_wallet(RenderWallet {
         state,
         user,
         portfolio,
         jar,
         hx,
-        WalletAction::Deposit,
-        &query,
-    )
+        locale,
+        action: WalletAction::Deposit,
+        page: query.page,
+    })
     .await
 }
 
@@ -453,9 +523,20 @@ async fn buy_page(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, hx, WalletAction::Buy, &query).await
+    render_wallet(RenderWallet {
+        state,
+        user,
+        portfolio,
+        jar,
+        hx,
+        locale,
+        action: WalletAction::Buy,
+        page: query.page,
+    })
+    .await
 }
 
 #[instrument(skip_all)]
@@ -465,36 +546,66 @@ async fn sell_page(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Query(query): Query<PageQuery>,
 ) -> Result<(CookieJar, Html<String>), AppError> {
-    render_wallet(state, user, portfolio, jar, hx, WalletAction::Sell, &query).await
+    render_wallet(RenderWallet {
+        state,
+        user,
+        portfolio,
+        jar,
+        hx,
+        locale,
+        action: WalletAction::Sell,
+        page: query.page,
+    })
+    .await
+}
+
+/// Tudo que uma renderização da carteira precisa (os handlers acima só variam
+/// a `action` e o resto vem dos extratores).
+struct RenderWallet {
+    state: AppState,
+    user: User,
+    portfolio: PortfolioService,
+    jar: CookieJar,
+    hx: HxRequest,
+    locale: Locale,
+    action: WalletAction,
+    page: Option<u32>,
 }
 
 /// O handler só faz HTTP: garante o token CSRF, pede a visão pronta ao serviço
 /// e renderiza o template. Toda a montagem (consultas, paginação) é do serviço.
 /// Requisição parcial (htmx) recebe só o fragmento da carteira; navegação
 /// normal (e restauração de histórico) recebe a página completa.
-async fn render_wallet(
-    state: AppState,
-    user: User,
-    portfolio: PortfolioService,
-    jar: CookieJar,
-    hx: HxRequest,
-    action: WalletAction,
-    query: &PageQuery,
-) -> Result<(CookieJar, Html<String>), AppError> {
+async fn render_wallet(request: RenderWallet) -> Result<(CookieJar, Html<String>), AppError> {
+    let RenderWallet {
+        state,
+        user,
+        portfolio,
+        jar,
+        hx,
+        locale,
+        action,
+        page,
+    } = request;
+
     let (jar, flash) = take_flash(jar);
     let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
 
-    let view = portfolio
-        .wallet_view(user.id(), query.page.unwrap_or(1))
-        .await?;
-    let wallet = WalletData::new(view, action, csrf_token, flash);
+    let view = portfolio.wallet_view(user.id(), page.unwrap_or(1)).await?;
+    let wallet = WalletData::new(view, action, csrf_token, flash, locale);
 
     let html = if hx.0 {
         WalletFragment { wallet }.render()?
     } else {
-        AssetsPage { user, wallet }.render()?
+        AssetsPage {
+            user,
+            wallet,
+            t: locale.strings(),
+        }
+        .render()?
     };
     Ok((jar, Html(html)))
 }
@@ -513,6 +624,7 @@ struct OperationFeedback {
     on_success: Flash,
     error_path: &'static str,
     error_action: WalletAction,
+    locale: Locale,
 }
 
 /// Converte o desfecho de uma operação da carteira na resposta certa para cada
@@ -537,7 +649,7 @@ async fn wallet_outcome(
     let (flash, path, action) = match outcome {
         Ok(()) => (feedback.on_success, "/assets", WalletAction::None),
         Err(error) => (
-            business_flash(error)?,
+            business_flash(error, feedback.locale.strings())?,
             feedback.error_path,
             feedback.error_action,
         ),
@@ -547,7 +659,7 @@ async fn wallet_outcome(
         let (jar, csrf_token) = ensure_csrf_token(jar, state.config.cookie_secure);
         let view = portfolio.wallet_view(user.id(), 1).await?;
         let fragment = WalletFragment {
-            wallet: WalletData::new(view, action, csrf_token, Some(flash)),
+            wallet: WalletData::new(view, action, csrf_token, Some(flash), feedback.locale),
         };
         Ok((jar, [("hx-push-url", path)], Html(fragment.render()?)).into_response())
     } else {
@@ -566,6 +678,7 @@ async fn deposit(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Form(form): Form<AmountForm>,
 ) -> Result<Response, AppError> {
     let outcome = async {
@@ -582,9 +695,10 @@ async fn deposit(
         hx,
         outcome,
         OperationFeedback {
-            on_success: Flash::success("depósito realizado."),
+            on_success: Flash::success(locale.strings().flash_deposit_done),
             error_path: "/deposit",
             error_action: WalletAction::Deposit,
+            locale,
         },
     )
     .await
@@ -604,6 +718,7 @@ async fn buy_asset(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Response, AppError> {
     let outcome = async {
@@ -620,9 +735,10 @@ async fn buy_asset(
         hx,
         outcome,
         OperationFeedback {
-            on_success: Flash::success("compra realizada."),
+            on_success: Flash::success(locale.strings().flash_buy_done),
             error_path: "/buy",
             error_action: WalletAction::Buy,
+            locale,
         },
     )
     .await
@@ -635,6 +751,7 @@ async fn sell_asset(
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Form(form): Form<TradeAssetForm>,
 ) -> Result<Response, AppError> {
     let outcome = async {
@@ -653,9 +770,10 @@ async fn sell_asset(
         hx,
         outcome,
         OperationFeedback {
-            on_success: Flash::success("venda realizada."),
+            on_success: Flash::success(locale.strings().flash_sell_done),
             error_path: "/sell",
             error_action: WalletAction::Sell,
+            locale,
         },
     )
     .await
@@ -672,15 +790,17 @@ struct SyncQuotesForm {
 async fn sync_quotes(
     State(state): State<AppState>,
     user: User,
-    repository: Repository,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
+    locale: Locale,
     Form(form): Form<SyncQuotesForm>,
 ) -> Result<Response, AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
-        sync_quotes_round(&repository).await.map(|_| ())
+        sync_quotes_round(&Repository::from_state(&state))
+            .await
+            .map(|_| ())
     }
     .await;
 
@@ -692,9 +812,10 @@ async fn sync_quotes(
         hx,
         outcome,
         OperationFeedback {
-            on_success: Flash::success("cotações atualizadas."),
+            on_success: Flash::success(locale.strings().flash_quotes_done),
             error_path: "/assets",
             error_action: WalletAction::None,
+            locale,
         },
     )
     .await
@@ -720,7 +841,18 @@ mod tests {
         assert!(!is_partial_request(&headers), "restauração de histórico");
     }
 
-    fn test_wallet() -> WalletData {
+    #[test]
+    fn language_switch_only_follows_local_absolute_paths() {
+        assert_eq!(sanitized_next(Some("/assets")), "/assets");
+        assert_eq!(sanitized_next(Some("/login")), "/login");
+        // Protocolo-relativo, URL absoluta e lixo caem no fallback seguro.
+        assert_eq!(sanitized_next(Some("//evil.example")), "/");
+        assert_eq!(sanitized_next(Some("https://evil.example")), "/");
+        assert_eq!(sanitized_next(Some("assets")), "/");
+        assert_eq!(sanitized_next(None), "/");
+    }
+
+    fn test_wallet(locale: Locale) -> WalletData {
         WalletData {
             holdings: vec![],
             available_assets: vec![],
@@ -737,6 +869,7 @@ mod tests {
             page: 1,
             has_prev: false,
             has_next: false,
+            t: locale.strings(),
             flash: Some(Flash::success("depósito realizado.")),
             chart: EquityChart::empty(),
         }
@@ -745,7 +878,7 @@ mod tests {
     #[test]
     fn the_wallet_fragment_is_partial_html_embedded_by_the_full_page() {
         let fragment = WalletFragment {
-            wallet: test_wallet(),
+            wallet: test_wallet(Locale::PtBr),
         }
         .render()
         .expect("fragment renders");
@@ -758,7 +891,8 @@ mod tests {
 
         let full = AssetsPage {
             user: User::new(1, "breno".to_string(), "user".to_string()),
-            wallet: test_wallet(),
+            wallet: test_wallet(Locale::PtBr),
+            t: Locale::PtBr.strings(),
         }
         .render()
         .expect("full page renders");
@@ -769,6 +903,49 @@ mod tests {
         assert!(full.contains("<div id=\"wallet\">"));
         assert!(full.contains("/static/htmx.js"));
         assert_eq!(full.matches("id=\"wallet\"").count(), 1);
+    }
+
+    #[test]
+    fn the_wallet_page_renders_in_both_languages() {
+        let render = |locale: Locale| {
+            AssetsPage {
+                user: User::new(1, "breno".to_string(), "user".to_string()),
+                wallet: test_wallet(locale),
+                t: locale.strings(),
+            }
+            .render()
+            .expect("page renders")
+        };
+
+        let pt = render(Locale::PtBr);
+        assert!(pt.contains("lang=\"pt-BR\""));
+        assert!(pt.contains("posições"));
+        assert!(pt.contains("patrimônio"));
+
+        let en = render(Locale::En);
+        assert!(en.contains("lang=\"en\""));
+        assert!(en.contains("positions"));
+        assert!(en.contains("net worth"));
+        // O dinheiro continua na convenção do DADO (BRL), não da interface.
+        assert!(en.contains("R$ 10,00"));
+    }
+
+    #[test]
+    fn the_login_page_renders_in_both_languages() {
+        let render = |locale: Locale, is_register: bool| {
+            LoginPage {
+                is_register,
+                csrf_token: "tok".to_string(),
+                flash: None,
+                t: locale.strings(),
+            }
+            .render()
+            .expect("login renders")
+        };
+
+        assert!(render(Locale::PtBr, false).contains("entre para acessar"));
+        assert!(render(Locale::En, false).contains("sign in"));
+        assert!(render(Locale::En, true).contains("create account"));
     }
 
     #[test]
@@ -852,15 +1029,5 @@ pub mod filters {
     #[askama::filter_fn]
     pub fn nonnegative(value: &Decimal, _: &dyn Values) -> askama::Result<bool> {
         Ok(*value >= Decimal::ZERO)
-    }
-
-    #[askama::filter_fn]
-    pub fn transaction_kind(value: &str, _: &dyn Values) -> askama::Result<&'static str> {
-        Ok(match value {
-            "deposit" => "deposito",
-            "buy" => "compra",
-            "sell" => "venda",
-            _ => "movimentacao",
-        })
     }
 }

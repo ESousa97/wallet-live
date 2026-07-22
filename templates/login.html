@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}wallet :: entrar{% endblock %}
+{% block title %}{{ t.title_login }}{% endblock %}
 
 {% block content %}
 <main class="flex min-h-screen items-center justify-center px-6">
@@ -8,9 +8,9 @@
         <div class="rounded-lg border border-neutral-800 bg-neutral-900/70 p-8 shadow-2xl">
             <h1 class="mb-1 text-2xl font-semibold tracking-tight">wallet</h1>
             {% if is_register %}
-            <p class="mb-6 text-sm text-neutral-400">crie sua conta para simular uma carteira de investimentos.</p>
+            <p class="mb-6 text-sm text-neutral-400">{{ t.intro_register }}</p>
             {% else %}
-            <p class="mb-6 text-sm text-neutral-400">entre para acessar saldo, posições e histórico.</p>
+            <p class="mb-6 text-sm text-neutral-400">{{ t.intro_login }}</p>
             {% endif %}
 
             {% match flash %}
@@ -26,7 +26,7 @@
             <form method="post" action="{% if is_register %}/register{% else %}/login{% endif %}" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <div>
-                    <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">usuário</label>
+                    <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">{{ t.username }}</label>
                     <input
                         id="username"
                         name="username"
@@ -41,7 +41,7 @@
                 </div>
 
                 <div>
-                    <label for="password" class="mb-1 block text-sm font-medium text-neutral-300">senha</label>
+                    <label for="password" class="mb-1 block text-sm font-medium text-neutral-300">{{ t.password }}</label>
                     <input
                         id="password"
                         name="password"
@@ -56,16 +56,31 @@
                     type="submit"
                     class="w-full rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
                 >
-                    {% if is_register %}criar conta{% else %}entrar{% endif %}
+                    {% if is_register %}{{ t.create_account }}{% else %}{{ t.sign_in }}{% endif %}
                 </button>
             </form>
         </div>
 
         {% if is_register %}
-        <p class="mt-4 text-center text-xs text-neutral-500">já tem conta? <a href="/login" class="text-neutral-300 underline underline-offset-4">entrar</a></p>
+        <p class="mt-4 text-center text-xs text-neutral-500">{{ t.have_account }} <a href="/login" class="text-neutral-300 underline underline-offset-4">{{ t.sign_in }}</a></p>
         {% else %}
-        <p class="mt-4 text-center text-xs text-neutral-500">novo por aqui? <a href="/register" class="text-neutral-300 underline underline-offset-4">criar conta</a></p>
+        <p class="mt-4 text-center text-xs text-neutral-500">{{ t.new_here }} <a href="/register" class="text-neutral-300 underline underline-offset-4">{{ t.create_account }}</a></p>
         {% endif %}
+
+        {% let next = self.form_path() %}
+        <nav aria-label="{{ t.lang_label }}" class="mt-3 flex items-center justify-center gap-1 text-xs text-neutral-600">
+            {% if t.lang == "pt-BR" %}
+            <span aria-current="true" class="px-1.5 py-1 font-semibold text-neutral-300">pt</span>
+            {% else %}
+            <a href="/lang/pt-BR?next={{ next }}" class="px-1.5 py-1 underline underline-offset-4 hover:text-neutral-200">pt</a>
+            {% endif %}
+            <span>·</span>
+            {% if t.lang == "en" %}
+            <span aria-current="true" class="px-1.5 py-1 font-semibold text-neutral-300">en</span>
+            {% else %}
+            <a href="/lang/en?next={{ next }}" class="px-1.5 py-1 underline underline-offset-4 hover:text-neutral-200">en</a>
+            {% endif %}
+        </nav>
     </div>
 </main>
 {% endblock %}

@@ -117,4 +117,9 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   recebem o parcial com flash inline e `HX-Push-Url` numa resposta única, sem
   JavaScript o fluxo clássico de redirect continua inteiro (*progressive
   enhancement*).
-- [ ] Internacionalização dos templates (multi-idioma).
+- [x] Internacionalização dos templates: pt-BR e inglês via catálogo tipado
+  (`i18n::Strings` — texto faltando num idioma é erro de compilação, campo
+  inexistente no template também). Idioma por cookie (`/lang/{code}`, com
+  `?next=` validado contra open redirect) > `Accept-Language` > pt-BR; flashes
+  de sucesso e de erro de negócio acompanham. Moeda, datas e CSV ficam na
+  convenção do dado (BRL/planilha pt-BR), não da interface.

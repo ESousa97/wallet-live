@@ -3,6 +3,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 use crate::error::AppError;
+use crate::i18n::Strings;
 
 /// Nome do cookie que transporta a mensagem entre o POST e a página seguinte.
 const FLASH_COOKIE: &str = "flash";
@@ -75,23 +76,24 @@ pub fn take_flash(jar: CookieJar) -> (CookieJar, Option<Flash>) {
     )
 }
 
-/// Traduz erros DE NEGÓCIO em mensagens amigáveis (pt-BR) para o banner. Erros
-/// internos (banco, template, JWT quebrado) NÃO viram flash: são devolvidos e
-/// seguem o fluxo normal de erro (500 logado, resposta genérica).
+/// Traduz erros DE NEGÓCIO em mensagens amigáveis no idioma da requisição para
+/// o banner. Erros internos (banco, template, JWT quebrado) NÃO viram flash:
+/// são devolvidos e seguem o fluxo normal de erro (500 logado, resposta
+/// genérica).
 ///
 /// Detalhe deliberado: credencial inválida e usuário inexistente têm a MESMA
 /// mensagem — a tela de login não confirma se um username existe.
-pub fn business_flash(error: AppError) -> Result<Flash, AppError> {
+pub fn business_flash(error: AppError, t: &Strings) -> Result<Flash, AppError> {
     let message = match &error {
-        AppError::InvalidAmount => "quantia inválida — informe um valor positivo.",
-        AppError::InsufficientBalance => "saldo insuficiente para esta compra.",
-        AppError::InsufficientHoldings => "posição insuficiente para esta venda.",
-        AppError::AssetDoesNotExist => "ativo inexistente.",
-        AppError::InvalidCredentials | AppError::UserDoesNotExist => "usuário ou senha incorretos.",
-        AppError::UsernameTaken => "este nome de usuário já está em uso.",
-        AppError::TooManyAttempts => "muitas tentativas — aguarde um instante e tente novamente.",
-        AppError::CsrfMismatch => "a sessão do formulário expirou — tente novamente.",
-        AppError::QuoteUnavailable => "cotações indisponíveis no momento — tente mais tarde.",
+        AppError::InvalidAmount => t.flash_invalid_amount,
+        AppError::InsufficientBalance => t.flash_insufficient_balance,
+        AppError::InsufficientHoldings => t.flash_insufficient_holdings,
+        AppError::AssetDoesNotExist => t.flash_asset_missing,
+        AppError::InvalidCredentials | AppError::UserDoesNotExist => t.flash_bad_credentials,
+        AppError::UsernameTaken => t.flash_username_taken,
+        AppError::TooManyAttempts => t.flash_too_many_attempts,
+        AppError::CsrfMismatch => t.flash_csrf,
+        AppError::QuoteUnavailable => t.flash_quotes_unavailable,
         _ => return Err(error),
     };
 
@@ -133,16 +135,31 @@ mod tests {
 
     #[test]
     fn business_errors_become_messages_and_internal_errors_do_not() {
-        assert!(business_flash(AppError::InsufficientBalance).is_ok());
+        use crate::i18n::{EN, PT_BR};
+
+        assert!(business_flash(AppError::InsufficientBalance, &PT_BR).is_ok());
         // Mesma mensagem para credencial e usuário inexistente (não vaza
-        // existência de conta).
-        let a = business_flash(AppError::InvalidCredentials)
-            .unwrap()
-            .message;
-        let b = business_flash(AppError::UserDoesNotExist).unwrap().message;
-        assert_eq!(a, b);
+        // existência de conta) — nos dois idiomas.
+        for t in [&PT_BR, &EN] {
+            let a = business_flash(AppError::InvalidCredentials, t)
+                .unwrap()
+                .message;
+            let b = business_flash(AppError::UserDoesNotExist, t)
+                .unwrap()
+                .message;
+            assert_eq!(a, b);
+        }
+        // O idioma muda a mensagem de fato.
+        assert_ne!(
+            business_flash(AppError::InsufficientBalance, &PT_BR)
+                .unwrap()
+                .message,
+            business_flash(AppError::InsufficientBalance, &EN)
+                .unwrap()
+                .message,
+        );
 
         // Erro interno passa direto para o fluxo de 500.
-        assert!(business_flash(AppError::Jwt("boom".into())).is_err());
+        assert!(business_flash(AppError::Jwt("boom".into()), &PT_BR).is_err());
     }
 }

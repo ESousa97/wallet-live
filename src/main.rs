@@ -2,6 +2,7 @@ mod app;
 pub mod auth;
 mod config;
 mod error;
+pub mod i18n;
 pub mod models;
 mod quotes;
 pub mod repository;
