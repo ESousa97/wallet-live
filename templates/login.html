@@ -3,30 +3,38 @@
 {% block title %}{{ t.title_login }}{% endblock %}
 
 {% block content %}
-<main class="flex min-h-screen items-center justify-center px-6">
+<main class="flex min-h-screen items-center justify-center px-4 py-10">
     <div class="w-full max-w-sm">
-        <div class="rounded-lg border border-neutral-800 bg-neutral-900/70 p-8 shadow-2xl">
-            <h1 class="mb-1 text-2xl font-semibold tracking-tight">wallet</h1>
+        <div class="mb-6 flex items-center gap-3">
+            <span aria-hidden="true" class="grid h-10 w-10 place-items-center rounded-xl bg-accent text-xl font-semibold text-plane">w</span>
+            <h1 class="text-xl font-semibold tracking-tight">wallet</h1>
+        </div>
+
+        <div class="rounded-2xl border border-hairline bg-surface p-6 sm:p-8">
             {% if is_register %}
-            <p class="mb-6 text-sm text-neutral-400">{{ t.intro_register }}</p>
+            <p class="mb-6 text-sm text-ink-3">{{ t.intro_register }}</p>
             {% else %}
-            <p class="mb-6 text-sm text-neutral-400">{{ t.intro_login }}</p>
+            <p class="mb-6 text-sm text-ink-3">{{ t.intro_login }}</p>
             {% endif %}
 
             {% match flash %}
             {% when Some with (flash) %}
             {% if flash.is_error() %}
-            <div role="alert" class="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{{ flash.message }}</div>
+            <div role="alert" class="mb-5 flex items-start gap-3 rounded-xl border border-down/30 bg-down/10 px-4 py-3 text-sm text-down">
+                <span aria-hidden="true" class="mt-px font-semibold">!</span>{{ flash.message }}
+            </div>
             {% else %}
-            <div role="status" class="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">{{ flash.message }}</div>
+            <div role="status" class="mb-5 flex items-start gap-3 rounded-xl border border-up/30 bg-up/10 px-4 py-3 text-sm text-up">
+                <span aria-hidden="true" class="mt-px font-semibold">✓</span>{{ flash.message }}
+            </div>
             {% endif %}
             {% when None %}
             {% endmatch %}
 
-            <form method="post" action="{% if is_register %}/register{% else %}/login{% endif %}" class="space-y-4">
+            <form method="post" action="{{ self.form_path() }}" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <div>
-                    <label for="username" class="mb-1 block text-sm font-medium text-neutral-300">{{ t.username }}</label>
+                    <label for="username" class="mb-1.5 block text-sm font-medium text-ink-2">{{ t.username }}</label>
                     <input
                         id="username"
                         name="username"
@@ -36,25 +44,25 @@
                         autocomplete="username"
                         autocapitalize="none"
                         spellcheck="false"
-                        class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+                        class="w-full rounded-xl border border-hairline bg-plane px-4 py-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
                     />
                 </div>
 
                 <div>
-                    <label for="password" class="mb-1 block text-sm font-medium text-neutral-300">{{ t.password }}</label>
+                    <label for="password" class="mb-1.5 block text-sm font-medium text-ink-2">{{ t.password }}</label>
                     <input
                         id="password"
                         name="password"
                         type="password"
                         required
                         autocomplete="{% if is_register %}new-password{% else %}current-password{% endif %}"
-                        class="w-full rounded-lg border border-neutral-700 bg-neutral-800/60 px-4 py-2.5 text-sm outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-600"
+                        class="w-full rounded-xl border border-hairline bg-plane px-4 py-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
                     />
                 </div>
 
                 <button
                     type="submit"
-                    class="w-full rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 active:scale-[0.99]"
+                    class="w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-plane transition hover:bg-accent-soft active:scale-[0.99]"
                 >
                     {% if is_register %}{{ t.create_account }}{% else %}{{ t.sign_in }}{% endif %}
                 </button>
@@ -62,23 +70,22 @@
         </div>
 
         {% if is_register %}
-        <p class="mt-4 text-center text-xs text-neutral-500">{{ t.have_account }} <a href="/login" class="text-neutral-300 underline underline-offset-4">{{ t.sign_in }}</a></p>
+        <p class="mt-5 text-center text-sm text-ink-3">{{ t.have_account }} <a href="/login" class="font-medium text-accent-soft transition hover:text-ink">{{ t.sign_in }}</a></p>
         {% else %}
-        <p class="mt-4 text-center text-xs text-neutral-500">{{ t.new_here }} <a href="/register" class="text-neutral-300 underline underline-offset-4">{{ t.create_account }}</a></p>
+        <p class="mt-5 text-center text-sm text-ink-3">{{ t.new_here }} <a href="/register" class="font-medium text-accent-soft transition hover:text-ink">{{ t.create_account }}</a></p>
         {% endif %}
 
         {% let next = self.form_path() %}
-        <nav aria-label="{{ t.lang_label }}" class="mt-3 flex items-center justify-center gap-1 text-xs text-neutral-600">
+        <nav aria-label="{{ t.lang_label }}" class="mt-6 flex items-center justify-center gap-0.5 text-xs">
             {% if t.lang == "pt-BR" %}
-            <span aria-current="true" class="px-1.5 py-1 font-semibold text-neutral-300">pt</span>
+            <span aria-current="true" class="rounded-md bg-raised px-2.5 py-1.5 font-semibold text-ink">pt</span>
             {% else %}
-            <a href="/lang/pt-BR?next={{ next }}" class="px-1.5 py-1 underline underline-offset-4 hover:text-neutral-200">pt</a>
+            <a href="/lang/pt-BR?next={{ next }}" class="rounded-md px-2.5 py-1.5 text-ink-3 transition hover:text-ink">pt</a>
             {% endif %}
-            <span>·</span>
             {% if t.lang == "en" %}
-            <span aria-current="true" class="px-1.5 py-1 font-semibold text-neutral-300">en</span>
+            <span aria-current="true" class="rounded-md bg-raised px-2.5 py-1.5 font-semibold text-ink">en</span>
             {% else %}
-            <a href="/lang/en?next={{ next }}" class="px-1.5 py-1 underline underline-offset-4 hover:text-neutral-200">en</a>
+            <a href="/lang/en?next={{ next }}" class="rounded-md px-2.5 py-1.5 text-ink-3 transition hover:text-ink">en</a>
             {% endif %}
         </nav>
     </div>

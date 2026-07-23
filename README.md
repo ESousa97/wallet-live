@@ -54,6 +54,8 @@ operações **transacionais** e cotações de mercado reais.
 | Templates | Askama — variáveis dos templates também checadas em compilação. |
 | Interatividade | htmx com HTML parcial: a mesma visão da carteira renderiza a página inteira (`assets.html`) ou só o fragmento (`wallet.html`) conforme o header `HX-Request`; operações respondem o fragmento atualizado na própria resposta (uma requisição, flash inline, `HX-Push-Url`). Sem o header (sem JS, restauração de histórico), vale o PRG clássico. |
 | i18n | Catálogo tipado (`i18n::Strings`, uma `const` por idioma): texto faltando é erro de compilação, e o askama checa os campos usados nos templates. Resolução: cookie `lang` > `Accept-Language` > pt-BR. |
+| CSS | Compilado em build-time pelo CLI standalone do Tailwind (executável único — **sem Node e sem npm**, então o build não herda a cadeia de suprimentos do ecossistema JS) e versionado como o cache `.sqlx`, com o CI conferindo o frescor. O `source(none)` desliga a varredura automática: sem ele o gerador lê o próprio output e o build deixa de ser determinístico entre plataformas. |
+| Cor | Paleta validada por script (banda de luminosidade, croma, separação sob daltonismo, contraste) contra a superfície real. Verde↔vermelho medem ΔE ~4,6 sob deuteranopia, então **nenhuma variação é comunicada só por cor** — sempre com seta ▲/▼ e sinal. O acento violeta não disputa hue com o par lucro/prejuízo. |
 
 ## Estrutura
 

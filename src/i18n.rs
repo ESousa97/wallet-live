@@ -147,6 +147,7 @@ pub struct Strings {
     pub chart_min: &'static str,
     pub chart_latest: &'static str,
     pub chart_max: &'static str,
+    pub chart_period: &'static str,
 
     // Formulários de operação.
     pub deposit_title: &'static str,
@@ -253,6 +254,7 @@ pub static PT_BR: Strings = Strings {
     chart_min: "mín",
     chart_latest: "último",
     chart_max: "máx",
+    chart_period: "no período",
 
     deposit_title: "depositar saldo",
     deposit_amount_aria: "valor do depósito em reais",
@@ -341,6 +343,7 @@ pub static EN: Strings = Strings {
     chart_min: "min",
     chart_latest: "latest",
     chart_max: "max",
+    chart_period: "over the period",
 
     deposit_title: "deposit funds",
     deposit_amount_aria: "deposit amount in reais",

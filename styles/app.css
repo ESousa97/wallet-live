@@ -11,20 +11,77 @@
    diretiva que mais enfraquece uma política. Com o CSS estático, a CSP fecha
    e o custo em JS cai a zero. */
 
-@import "tailwindcss";
+/* `source(none)` DESLIGA a varredura automática do projeto — sem isso o
+   Tailwind vasculha o repositório inteiro e recolhe candidatos de arquivos que
+   não são template (inclusive do próprio CSS gerado, que assim se
+   auto-alimenta e nunca solta uma classe removida). O efeito prático era um
+   build não-determinístico: a mesma entrada rendia CSS diferente em máquinas
+   diferentes, e o check de frescor do CI quebrava sozinho.
 
-/* Onde procurar as classes usadas (o CSS gerado contém só o que os templates
-   realmente referenciam). */
+   Com a fonte declarada explicitamente, o CSS é função apenas dos templates —
+   reprodutível em qualquer plataforma, e classe removida do HTML some do
+   arquivo. */
+@import "tailwindcss" source(none);
 @source "../templates/**/*.html";
 
-/* Anel de foco uniforme para navegação por teclado; inputs e selects mantêm o
-   próprio tratamento via `focus:ring` do Tailwind. Vivia inline no
-   `base.html` — mudou de casa para que nenhuma tag `<style>` sobre na página
-   e o `'unsafe-inline'` possa sair da CSP. */
+/* Tokens da interface. Os valores de cor foram VALIDADOS contra a superfície
+   escura com o validador de paleta (checagens de banda de luminosidade, piso
+   de croma, separação para daltonismo e contraste), não escolhidos no olho.
+
+   Achado que moldou o desenho: verde e vermelho, em qualquer tom, ficam a
+   ΔE ~4,6 sob deuteranopia — indistinguíveis para ~8% dos homens. Eles ficam
+   (é a convenção de mercado e são cores de ESTADO, não de série), mas a
+   direção do resultado NUNCA é comunicada só por cor: toda variação sai com
+   seta ▲/▼ e sinal explícito. A cor é o canal redundante.
+
+   O acento é violeta justamente para não disputar hue com o par lucro/prejuízo
+   (ΔE 28,3 do verde em visão normal) — identidade de marca e semântica de
+   resultado nunca se confundem. */
+@theme {
+    /* Superfícies */
+    --color-plane: #0d0d0d;
+    --color-surface: #1a1a19;
+    --color-raised: #232322;
+    --color-hairline: rgba(255, 255, 255, 0.1);
+
+    /* Tinta */
+    --color-ink: #ffffff;
+    --color-ink-2: #c3c2b7;
+    --color-ink-3: #898781;
+
+    /* Marca */
+    --color-accent: #9085e9;
+    --color-accent-soft: #b3abf0;
+
+    /* Estado do resultado (sempre acompanhado de seta + sinal) */
+    --color-up: #34d399;
+    --color-down: #fb7185;
+
+    /* Tipografia: sans do sistema em tudo, inclusive no número-herói — face
+       display ou serifada lê como decoração fora de marca. */
+    --font-sans:
+        system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+        sans-serif;
+}
+
 @layer base {
+    /* Anel de foco uniforme para navegação por teclado; inputs e selects
+       mantêm o próprio tratamento via `focus:ring` do Tailwind. Vivia inline
+       no `base.html` — mudou de casa para que nenhuma tag `<style>` sobre na
+       página e o `'unsafe-inline'` possa sair da CSP. */
     a:focus-visible,
-    button:focus-visible {
-        outline: 2px solid var(--color-neutral-400);
+    button:focus-visible,
+    summary:focus-visible {
+        outline: 2px solid var(--color-accent-soft);
         outline-offset: 2px;
+        border-radius: 0.5rem;
+    }
+
+    /* O número-herói usa algarismos PROPORCIONAIS: `tabular-nums` dá a todo
+       dígito a largura do zero, o que em corpo grande deixa o número frouxo.
+       Alinhamento tabular fica reservado às colunas que precisam alinhar
+       verticalmente (linhas de tabela), via utilitário `tabular-nums`. */
+    body {
+        font-feature-settings: "cv11";
     }
 }

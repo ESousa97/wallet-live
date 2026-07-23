@@ -3,38 +3,35 @@
 {% block title %}{{ t.title_wallet }}{% endblock %}
 
 {% block content %}
-<main class="mx-auto max-w-6xl px-6 py-8">
-    <a href="#conteudo" class="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-neutral-100 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-neutral-900">{{ t.skip_link }}</a>
+<a href="#conteudo" class="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-plane">{{ t.skip_link }}</a>
+
+<div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10">
     <header class="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <h1 class="text-2xl font-semibold tracking-tight">wallet</h1>
-            <p class="mt-1 text-sm text-neutral-400">{{ t.welcome }} {{ user.username() }}</p>
+        <div class="flex items-center gap-3">
+            <span aria-hidden="true" class="grid h-9 w-9 place-items-center rounded-xl bg-accent text-lg font-semibold text-plane">w</span>
+            <div>
+                <p class="text-sm font-semibold tracking-tight">wallet</p>
+                <p class="text-xs text-ink-3">{{ t.welcome }} {{ user.username() }}</p>
+            </div>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-            <a href="/deposit" hx-get="/deposit" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-white">{{ t.nav_deposit }}</a>
-            <a href="/buy" hx-get="/buy" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-300 transition hover:border-neutral-500 hover:text-white">{{ t.nav_buy }}</a>
-            <a href="/sell" hx-get="/sell" hx-target="#wallet" hx-swap="outerHTML" hx-push-url="true" class="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-300 transition hover:border-neutral-500 hover:text-white">{{ t.nav_sell }}</a>
-            <form method="post" action="/quotes/sync" hx-post="/quotes/sync" hx-target="#wallet" hx-swap="outerHTML">
-                <input type="hidden" name="csrf_token" value="{{ wallet.csrf_token }}" />
-                <button class="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-300 transition hover:border-neutral-500 hover:text-white">{{ t.nav_sync_quotes }}</button>
-            </form>
-            <a href="/logout" class="rounded-lg border border-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-500 transition hover:text-neutral-200">{{ t.nav_logout }}</a>
-            <nav aria-label="{{ t.lang_label }}" class="ml-1 flex items-center gap-1 text-xs text-neutral-600">
+
+        <div class="flex items-center gap-1">
+            <nav aria-label="{{ t.lang_label }}" class="mr-1 flex items-center gap-0.5 rounded-lg border border-hairline p-0.5 text-xs">
                 {% if t.lang == "pt-BR" %}
-                <span aria-current="true" class="px-1.5 py-1 font-semibold text-neutral-300">pt</span>
+                <span aria-current="true" class="rounded-md bg-raised px-2 py-1 font-semibold text-ink">pt</span>
                 {% else %}
-                <a href="/lang/pt-BR?next=/assets" class="px-1.5 py-1 underline underline-offset-4 hover:text-neutral-200">pt</a>
+                <a href="/lang/pt-BR?next=/assets" class="rounded-md px-2 py-1 text-ink-3 transition hover:text-ink">pt</a>
                 {% endif %}
-                <span>·</span>
                 {% if t.lang == "en" %}
-                <span aria-current="true" class="px-1.5 py-1 font-semibold text-neutral-300">en</span>
+                <span aria-current="true" class="rounded-md bg-raised px-2 py-1 font-semibold text-ink">en</span>
                 {% else %}
-                <a href="/lang/en?next=/assets" class="px-1.5 py-1 underline underline-offset-4 hover:text-neutral-200">en</a>
+                <a href="/lang/en?next=/assets" class="rounded-md px-2 py-1 text-ink-3 transition hover:text-ink">en</a>
                 {% endif %}
             </nav>
+            <a href="/logout" class="rounded-lg px-3 py-2 text-sm font-medium text-ink-3 transition hover:bg-raised hover:text-ink">{{ t.nav_logout }}</a>
         </div>
     </header>
 
     {% include "wallet.html" %}
-</main>
+</div>
 {% endblock %}

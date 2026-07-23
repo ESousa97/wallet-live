@@ -424,6 +424,21 @@ struct WalletData {
 }
 
 impl WalletData {
+    // Qual formulário está aberto. Os templates usam isto para marcar o botão
+    // correspondente como ativo (`aria-current`), já que o askama não avalia
+    // `matches!` sobre o enum direto.
+    fn is_deposit(&self) -> bool {
+        matches!(self.action, WalletAction::Deposit)
+    }
+
+    fn is_buy(&self) -> bool {
+        matches!(self.action, WalletAction::Buy)
+    }
+
+    fn is_sell(&self) -> bool {
+        matches!(self.action, WalletAction::Sell)
+    }
+
     fn new(
         view: WalletView,
         action: WalletAction,
@@ -1068,5 +1083,14 @@ pub mod filters {
     #[askama::filter_fn]
     pub fn nonnegative(value: &Decimal, _: &dyn Values) -> askama::Result<bool> {
         Ok(*value >= Decimal::ZERO)
+    }
+
+    /// Percentual em valor ABSOLUTO, com vírgula decimal. O sinal fica por
+    /// conta do template, que o emite junto da seta ▲/▼ — direção nunca é
+    /// comunicada só pela cor (verde e vermelho são indistinguíveis para
+    /// deuteranopia; medido: ΔE 4,6).
+    #[askama::filter_fn]
+    pub fn percent(value: &Decimal, _: &dyn Values) -> askama::Result<String> {
+        Ok(format!("{:.2}", value.abs()).replace('.', ","))
     }
 }

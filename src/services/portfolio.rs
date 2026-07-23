@@ -27,14 +27,32 @@ pub struct WalletView {
     pub chart: EquityChart,
 }
 
-/// Série do patrimônio pronta para desenhar: os pontos já vêm projetados no
-/// viewBox do SVG (100×32), então o template só interpola a string — zero
-/// JavaScript, amigável à CSP.
+/// Dimensões do viewBox do gráfico. A proporção é fixa e o SVG escala
+/// uniformemente (sem `preserveAspectRatio="none"`), para que o marcador do
+/// último ponto continue redondo em qualquer largura de tela.
+const CHART_W: f64 = 600.0;
+const CHART_H: f64 = 160.0;
+/// Margem interna: o marcador tem raio 5 e ganha um anel de 2px, então precisa
+/// de folga para não ser cortado pela borda do viewBox.
+const CHART_PAD_X: f64 = 10.0;
+const CHART_PAD_Y: f64 = 14.0;
+
+/// Série do patrimônio pronta para desenhar: os caminhos já vêm projetados no
+/// viewBox do SVG, então o template só interpola strings — zero JavaScript,
+/// amigável à CSP.
 pub struct EquityChart {
-    pub points: String,
+    /// Caminho da linha (`d` de um `<path>`).
+    pub line: String,
+    /// Mesmo caminho fechado contra a base, para o preenchimento em wash.
+    pub area: String,
+    /// Coordenadas do último ponto, onde vai o marcador.
+    pub last_x: String,
+    pub last_y: String,
     pub min_value: Decimal,
     pub max_value: Decimal,
     pub latest_value: Decimal,
+    /// Variação do primeiro ao último ponto da janela, em %.
+    pub delta_pct: Option<Decimal>,
     has_data: bool,
 }
 
@@ -44,21 +62,31 @@ impl EquityChart {
         self.has_data
     }
 
+    /// A série subiu no período? Decide a cor do traço — sempre acompanhada do
+    /// percentual com sinal, nunca cor sozinha.
+    pub fn is_up(&self) -> bool {
+        self.delta_pct.unwrap_or(Decimal::ZERO) >= Decimal::ZERO
+    }
+
     /// Gráfico vazio (também usado nos testes de renderização do front-end).
     pub(crate) fn empty() -> Self {
         Self {
-            points: String::new(),
+            line: String::new(),
+            area: String::new(),
+            last_x: "0".to_string(),
+            last_y: "0".to_string(),
             min_value: Decimal::ZERO,
             max_value: Decimal::ZERO,
             latest_value: Decimal::ZERO,
+            delta_pct: None,
             has_data: false,
         }
     }
 }
 
-/// Projeta a série no viewBox 100×32 (margem de 2): x distribui os pontos
-/// uniformemente, y escala entre o mínimo e o máximo da janela. Série constante
-/// vira uma linha reta no meio — sem divisão por zero.
+/// Projeta a série no viewBox: x distribui os pontos uniformemente, y escala
+/// entre o mínimo e o máximo da janela. Série constante vira uma linha reta no
+/// meio — sem divisão por zero.
 fn equity_chart(snapshots: &[PortfolioSnapshot]) -> EquityChart {
     if snapshots.len() < 2 {
         return EquityChart::empty();
@@ -70,13 +98,16 @@ fn equity_chart(snapshots: &[PortfolioSnapshot]) -> EquityChart {
     let range = max - min;
 
     let last_index = (values.len() - 1) as f64;
-    let points = values
+    let span_x = CHART_W - 2.0 * CHART_PAD_X;
+    let span_y = CHART_H - 2.0 * CHART_PAD_Y;
+
+    let coords: Vec<(f64, f64)> = values
         .iter()
         .enumerate()
         .map(|(i, value)| {
-            let x = 2.0 + (i as f64 / last_index) * 96.0;
+            let x = CHART_PAD_X + (i as f64 / last_index) * span_x;
             let y = if range.is_zero() {
-                16.0
+                CHART_H / 2.0
             } else {
                 // Converte para f64 SÓ para desenhar (coordenadas de tela);
                 // os valores exibidos continuam Decimal exato.
@@ -84,18 +115,39 @@ fn equity_chart(snapshots: &[PortfolioSnapshot]) -> EquityChart {
                     .to_string()
                     .parse::<f64>()
                     .unwrap_or(0.5);
-                30.0 - ratio * 28.0
+                CHART_PAD_Y + (1.0 - ratio) * span_y
             };
-            format!("{x:.2},{y:.2}")
+            (x, y)
+        })
+        .collect();
+
+    let line = coords
+        .iter()
+        .enumerate()
+        .map(|(i, (x, y))| {
+            let verb = if i == 0 { 'M' } else { 'L' };
+            format!("{verb}{x:.2} {y:.2}")
         })
         .collect::<Vec<_>>()
         .join(" ");
 
+    // O preenchimento é a mesma linha fechada até a base do viewBox.
+    let (first_x, _) = coords[0];
+    let (last_x, last_y) = *coords.last().expect("non-empty");
+    let area = format!("{line} L{last_x:.2} {CHART_H:.2} L{first_x:.2} {CHART_H:.2} Z");
+
+    let first_value = *values.first().expect("non-empty");
+    let latest_value = *values.last().expect("non-empty");
+
     EquityChart {
-        points,
+        line,
+        area,
+        last_x: format!("{last_x:.2}"),
+        last_y: format!("{last_y:.2}"),
         min_value: min,
         max_value: max,
-        latest_value: *values.last().expect("non-empty"),
+        latest_value,
+        delta_pct: crate::models::percent_of(latest_value - first_value, first_value),
         has_data: true,
     }
 }
@@ -320,13 +372,25 @@ mod tests {
         assert_eq!(chart.max_value, dec!(200));
         assert_eq!(chart.latest_value, dec!(150));
 
-        let points: Vec<&str> = chart.points.split(' ').collect();
-        assert_eq!(points.len(), 3);
-        // Primeiro ponto na margem esquerda, no fundo (valor mínimo);
-        // segundo no meio, no topo (valor máximo).
-        assert_eq!(points[0], "2.00,30.00");
-        assert_eq!(points[1], "50.00,2.00");
-        assert!(points[2].starts_with("98.00,"));
+        // Primeiro ponto na margem esquerda e no fundo (valor mínimo); segundo
+        // no meio e no topo (valor máximo); o último fecha na margem direita.
+        assert_eq!(chart.line, "M10.00 146.00 L300.00 14.00 L590.00 80.00");
+
+        // O preenchimento é a mesma linha fechada contra a base do viewBox.
+        assert_eq!(
+            chart.area,
+            "M10.00 146.00 L300.00 14.00 L590.00 80.00 L590.00 160.00 L10.00 160.00 Z"
+        );
+
+        // O marcador fica sobre o último ponto da linha.
+        assert_eq!(
+            (chart.last_x.as_str(), chart.last_y.as_str()),
+            ("590.00", "80.00")
+        );
+
+        // Variação do período: de 100 para 150 é +50%, e a série sobe.
+        assert_eq!(chart.delta_pct, Some(dec!(50)));
+        assert!(chart.is_up());
     }
 
     #[test]
@@ -334,7 +398,15 @@ mod tests {
         // Série constante: linha reta no meio, sem divisão por zero.
         let flat = equity_chart(&[snapshot(dec!(50)), snapshot(dec!(50))]);
         assert!(flat.has_data());
-        assert_eq!(flat.points, "2.00,16.00 98.00,16.00");
+        assert_eq!(flat.line, "M10.00 80.00 L590.00 80.00");
+        // Sem variação: 0% conta como "não caiu".
+        assert_eq!(flat.delta_pct, Some(dec!(0)));
+        assert!(flat.is_up());
+
+        // Série que cai pinta de vermelho e reporta o percentual negativo.
+        let down = equity_chart(&[snapshot(dec!(200)), snapshot(dec!(150))]);
+        assert_eq!(down.delta_pct, Some(dec!(-25)));
+        assert!(!down.is_up());
 
         // Menos de dois pontos não formam linha.
         assert!(!equity_chart(&[snapshot(dec!(50))]).has_data());

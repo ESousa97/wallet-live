@@ -122,6 +122,14 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   recebem o parcial com flash inline e `HX-Push-Url` numa resposta única, sem
   JavaScript o fluxo clássico de redirect continua inteiro (*progressive
   enhancement*).
+- [x] Interface de produto: linguagem visual de carteira de verdade —
+  número-herói do patrimônio, fileira de indicadores, gráfico de área e tabela
+  de posições arejada, sobre tokens de tema (`styles/app.css`) em vez de
+  classes soltas. Paleta **validada por script** contra a superfície escura, não
+  escolhida no olho. Achado que moldou o desenho: verde e vermelho ficam a
+  ΔE ~4,6 sob deuteranopia (indistinguíveis para ~8% dos homens), então toda
+  variação sai com seta ▲/▼ **e** sinal — a cor é canal redundante. O acento é
+  violeta justamente para não disputar hue com o par lucro/prejuízo.
 - [x] Internacionalização dos templates: pt-BR e inglês via catálogo tipado
   (`i18n::Strings` — texto faltando num idioma é erro de compilação, campo
   inexistente no template também). Idioma por cookie (`/lang/{code}`, com

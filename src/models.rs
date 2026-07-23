@@ -47,6 +47,16 @@ pub struct WalletSummary {
     pub total_delta: Decimal,
 }
 
+impl WalletSummary {
+    /// Resultado dos ativos em %, sobre o que foi investido. `None` quando não
+    /// há nada investido: percentual sobre base zero não existe, e é
+    /// exatamente o estado da carteira recém-criada — a interface mostra o
+    /// valor absoluto e omite o percentual em vez de exibir "0%" ou "∞".
+    pub fn delta_pct(&self) -> Option<Decimal> {
+        percent_of(self.total_delta, self.total_invested)
+    }
+}
+
 #[derive(Clone)]
 pub struct Holding {
     pub id: i64,
@@ -57,6 +67,22 @@ pub struct Holding {
     pub current_value: Decimal,
     pub invested_value: Decimal,
     pub value_delta: Decimal,
+}
+
+impl Holding {
+    /// Resultado da posição em %, sobre o custo médio investido nela.
+    pub fn delta_pct(&self) -> Option<Decimal> {
+        percent_of(self.value_delta, self.invested_value)
+    }
+}
+
+/// `parte / base` em pontos percentuais, com duas casas. Base zero devolve
+/// `None` em vez de estourar a divisão.
+pub fn percent_of(part: Decimal, base: Decimal) -> Option<Decimal> {
+    if base.is_zero() {
+        return None;
+    }
+    Some((part / base * Decimal::ONE_HUNDRED).round_dp(2))
 }
 
 /// Um ponto da série do patrimônio (usado pelo gráfico de evolução).
