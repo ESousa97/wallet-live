@@ -1,5 +1,18 @@
 # Entrega final — wallet-live
 
+## Objetivo
+
+Documento de **avaliação acadêmica**: relaciona os requisitos do projeto final do
+bootcamp à evidência correspondente no repositório, registra o que foi feito além
+do escopo didático e descreve um roteiro curto de demonstração.
+
+## Escopo
+
+Este é o único documento com finalidade acadêmica. Ele não descreve arquitetura,
+contratos nem operação — para isso, ver [../README.md](../README.md). A ligação
+entre cada aula do curso e a decisão técnica correspondente fica em
+[../aprendizado/](../aprendizado/).
+
 ## Resumo
 
 `wallet-live` é a carteira digital de investimentos proposta no projeto final

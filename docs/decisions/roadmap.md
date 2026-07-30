@@ -1,8 +1,29 @@
-# Roadmap
+# Roadmap e histórico de fases
 
-Evolução planejada do **wallet**. A ordem reflete as prioridades do projeto:
-**correção financeira → segurança → arquitetura → operação → produto**. Um item
-só avança de fase quando o anterior tem rede de testes cobrindo o comportamento.
+## Objetivo
+
+Registrar a sequência de evolução do **wallet** em cinco fases, a ordem das
+prioridades que a determinou e o estado de cada item.
+
+## Estado atual: todas as cinco fases estão concluídas
+
+**Todos os itens listados neste documento estão entregues** — não há item em
+aberto abaixo. Este documento é, hoje, um **histórico de fases**, não um plano de
+trabalho. O que ainda não existe está registrado em outro lugar, deliberadamente
+separado para não ser lido como capacidade já implementada:
+
+| O que | Onde |
+| --- | --- |
+| Limitações conhecidas do que está entregue | [known-limitations.md](known-limitations.md) |
+| Débitos técnicos, com prioridade e recomendação | [technical-debt.md](technical-debt.md) |
+| Lacunas da suíte de testes | [../testing/test-strategy.md](../testing/test-strategy.md) |
+| Decisões pendentes de formalização | [../adr/README.md](../adr/README.md) |
+
+A ordem das fases reflete as prioridades do projeto: **correção financeira →
+segurança → arquitetura → operação → produto**. Um item só avançou de fase quando
+o anterior tinha rede de testes cobrindo o comportamento — a correspondência
+fase → testes está em
+[../testing/test-catalogue.md](../testing/test-catalogue.md).
 
 ## ✅ Fase 1 — Fundações e integridade de dados
 
@@ -145,4 +166,5 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   zero e o estado vazio oferece a próxima ação.
 - [x] Acabamento de entrega: sessão expirada em htmx redireciona a página
   inteira, respostas privadas usam `no-store`, SIGTERM participa do shutdown
-  gracioso e o roteiro de avaliação está documentado em `ENTREGA.md`.
+  gracioso e o roteiro de avaliação está documentado em
+  [../delivery/course-delivery.md](../delivery/course-delivery.md).

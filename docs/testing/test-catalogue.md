@@ -1,97 +1,37 @@
-# Testes
+# Catálogo de testes
 
-118 testes, em duas camadas, com os payloads das integrações externas
-versionados no repositório. Este documento diz **o que cada um trava e por que
-ele existe** — um teste cujo motivo não está escrito em algum lugar é um teste
-que alguém apaga no primeiro refactor em que ele incomoda.
+## Objetivo
 
-## Índice
+Inventário **caso a caso** dos 118 testes: o que cada um trava e por que existe.
+Um teste cujo motivo não está escrito em algum lugar é um teste que alguém apaga
+no primeiro refactor em que ele incomoda.
 
-1. [As duas camadas, e por que são duas](#1-as-duas-camadas-e-por-que-são-duas)
-2. [Como rodar](#2-como-rodar)
-3. [Cobertura por fase do roadmap](#3-cobertura-por-fase-do-roadmap)
-4. [Catálogo: unidade](#4-catálogo-unidade)
-5. [Catálogo: contrato](#5-catálogo-contrato)
-6. [O que a suíte não cobre](#6-o-que-a-suíte-não-cobre)
+## Escopo
+
+Coberto: todos os testes automatizados existentes, agrupados por arquivo, com o
+risco que cada um reduz. Não coberto: por que a suíte tem dois níveis, escolha de
+dublês, execução e limites conhecidos — isso fica em
+[test-strategy.md](test-strategy.md). Para a leitura por risco em vez de por
+arquivo, ver [test-matrix.md](test-matrix.md).
+
+## Como ler as tabelas
+
+Cada linha nomeia o teste, o invariante que ele trava e o motivo pelo qual foi
+escrito. Onde a coluna "Por que existe" está vazia, o teste é um caso de borda
+óbvio do teste imediatamente acima e o motivo é o mesmo.
+
+Para rodar um teste isolado:
+
+```bash
+cargo test <nome_do_teste>
+```
 
 ---
 
-## 1. As duas camadas, e por que são duas
+## 1. Cobertura por fase entregue
 
-**Unidade — `src/**/#[cfg(test)] mod tests` (83 testes).** Moram ao lado do
-código que testam e têm acesso ao que é privado: a projeção de um gráfico no
-`viewBox`, a inversão de uma taxa de câmbio, a montagem de uma URL, o cálculo de
-custo médio contra um Postgres efêmero. É o idioma de Rust para internos, e é
-onde a asserção pode ser precisa — comparar a string exata de um `<path>` SVG,
-por exemplo.
-
-**Contrato — `tests/*.rs` (35 testes).** São crates separados: só alcançam o que
-é público, e é essa restrição que os torna úteis. Eles atravessam as **mesmas
-funções que o servidor atravessa**, com as **mesmas entradas que a rede
-entrega** — um payload JSON real de terceiro, uma requisição HTTP passando por
-todos os middlewares. É a camada que responde "isto funciona montado?", que
-nenhum teste de unidade pode responder.
-
-A pasta `tests/` só existe porque o crate ganhou um alvo de biblioteca
-(`src/lib.rs`): testes de integração não conseguem importar de um binário.
-Enquanto tudo vivia em `main.rs`, a única camada possível era a de unidade.
-
-### Por que payload real, e não fixture escrito à mão
-
-Um fixture inventado testa a **nossa ideia** do formato. O formato é do outro
-lado. As duas coisas divergem exatamente onde dói — dois achados concretos da
-captura versionada em [`tests/payloads/`](../tests/payloads/README.md):
-
-- A Coinbase entrega cada taxa como **string**, com precisão arbitrária: a maior
-  da captura tem **41 dígitos significativos**, mais que os 28 da mantissa do
-  `Decimal`. E o mapa das 636 moedas é decodificado de uma vez — uma taxa que não
-  caiba derruba a sincronização de **todos** os pares. Um fixture com
-  `"BTC": 0.0000031` passaria para sempre sem nunca tocar nisso.
-- A CoinGecko manda `null` em campos que o tipo declara como número, e um `roi`
-  que às vezes é objeto e às vezes `null`. São 30 campos por moeda, dos quais
-  lemos 15.
-
-Nenhuma asserção depende da cotação do dia. Elas conferem invariantes (escala
-travada, campo obrigatório presente, ausente virando neutro), nunca "BTC vale
-R$ 327.777" — um teste que precisasse de recaptura semanal seria um alarme falso
-semanal.
-
----
-
-## 2. Como rodar
-
-A suíte inteira precisa de um Postgres de pé: os testes de banco usam
-`#[sqlx::test]`, que cria e derruba um banco **efêmero e isolado por teste**.
-
-```bash
-docker compose up -d db
-```
-
-```bash
-cargo test
-```
-
-Só o que não toca banco (rápido, roda em qualquer máquina):
-
-```bash
-cargo test --test payload_market --test payload_quotes
-```
-
-Uma bateria só:
-
-```bash
-cargo test --test http_web
-```
-
-O CI roda `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` e
-`cargo test`, nesta ordem.
-
----
-
-## 3. Cobertura por fase do roadmap
-
-Cada fase entregue tem testes, e eles nem sempre moram onde a fase foi
-implementada — o que importa é que exista uma asserção travando a decisão.
+As fases são as de [../decisions/roadmap.md](../decisions/roadmap.md). Cada fase
+entregue tem testes, e eles nem sempre moram onde a fase foi implementada — o que importa é que exista uma asserção travando a decisão.
 
 | Fase | Onde estão os testes |
 |---|---|
@@ -103,7 +43,7 @@ implementada — o que importa é que exista uma asserção travando a decisão.
 
 ---
 
-## 4. Catálogo: unidade
+## 2. Testes de unidade
 
 ### `src/repository.rs` — 26 testes, contra Postgres efêmero
 
@@ -232,7 +172,7 @@ ao navegador.
 
 ---
 
-## 5. Catálogo: contrato
+## 3. Testes de contrato
 
 ### `tests/payload_quotes.rs` — 5 testes
 
@@ -301,25 +241,3 @@ CSRF, redirecionamento, banner — e nada disso era exercitado montado.
 | `liveness_and_readiness_are_separate_probes` | `/healthz`, `/readyz`, `/health` respondem | Liveness não toca o banco: reiniciar o app não conserta um Postgres fora do ar |
 | `the_statement_exports_as_an_authenticated_csv_download` | Autenticado, com `Content-Disposition: attachment` e separador `;` | Sem o cabeçalho o navegador renderiza o CSV como texto na tela |
 | `the_admin_credential_authorises_the_catalogue_route` | A credencial do painel é a mesma da API | |
-
----
-
-## 6. O que a suíte não cobre
-
-Honestidade sobre os limites, que é parte do desenho:
-
-- **Navegador de verdade.** Nada aqui executa JavaScript. O htmx e a máscara
-  monetária são verificados pelo HTML que o servidor emite (atributos `hx-*`,
-  ordem dos `<script>`, `defer`), não pelo comportamento no DOM. Um erro de
-  runtime no htmx passaria.
-- **Layout.** Os testes conferem que as classes renderizadas existem no CSS
-  compilado, não que o resultado visual está certo. O painel de mercado empilhado
-  abaixo de 1024 px é comportamento correto do breakpoint — e nenhum teste
-  distingue "correto" de "indesejado" aqui.
-- **As chamadas HTTP externas.** `fetch` e `fetch_brl_rates` (rede) não são
-  testados; o parse que eles alimentam é. Foi uma escolha: teste que bate em API
-  de terceiro falha quando a rede oscila, e passa a medir a internet em vez do
-  código.
-- **Concorrência dos jobs.** O `RwLock` do snapshot e o `Mutex` do cooldown de
-  cotações não têm teste de corrida.
-- **Carga.** Nenhuma medição de latência ou throughput.
