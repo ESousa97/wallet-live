@@ -65,7 +65,11 @@ impl EquityChart {
     /// A série subiu no período? Decide a cor do traço — sempre acompanhada do
     /// percentual com sinal, nunca cor sozinha.
     pub fn is_up(&self) -> bool {
-        self.delta_pct.unwrap_or(Decimal::ZERO) >= Decimal::ZERO
+        self.delta_pct.unwrap_or(Decimal::ZERO) > Decimal::ZERO
+    }
+
+    pub fn is_down(&self) -> bool {
+        self.delta_pct.unwrap_or(Decimal::ZERO) < Decimal::ZERO
     }
 
     /// Gráfico vazio (também usado nos testes de renderização do front-end).
@@ -289,6 +293,13 @@ impl<R: PortfolioRepository> PortfolioService<R> {
         )?;
 
         let has_next = has_next_page(offset, transactions.len(), total_transactions);
+        // Zero representa "ainda sem cotação" no catálogo. Ele continua
+        // visível na API administrativa, mas não aparece como opção de compra:
+        // uma operação financeira nunca pode ser aberta gratuitamente.
+        let available_assets = available_assets
+            .into_iter()
+            .filter(|asset| asset.unit_value > Decimal::ZERO)
+            .collect();
 
         Ok(WalletView {
             summary,
@@ -399,14 +410,16 @@ mod tests {
         let flat = equity_chart(&[snapshot(dec!(50)), snapshot(dec!(50))]);
         assert!(flat.has_data());
         assert_eq!(flat.line, "M10.00 80.00 L590.00 80.00");
-        // Sem variação: 0% conta como "não caiu".
+        // Sem variação: linha neutra, sem fingir alta.
         assert_eq!(flat.delta_pct, Some(dec!(0)));
-        assert!(flat.is_up());
+        assert!(!flat.is_up());
+        assert!(!flat.is_down());
 
         // Série que cai pinta de vermelho e reporta o percentual negativo.
         let down = equity_chart(&[snapshot(dec!(200)), snapshot(dec!(150))]);
         assert_eq!(down.delta_pct, Some(dec!(-25)));
         assert!(!down.is_up());
+        assert!(down.is_down());
 
         // Menos de dois pontos não formam linha.
         assert!(!equity_chart(&[snapshot(dec!(50))]).has_data());
@@ -557,11 +570,18 @@ mod tests {
                 total_delta: dec!(10),
             },
             holdings: vec![holding("bitcoin")],
-            assets: vec![Asset {
-                id: 1,
-                name: "bitcoin".to_string(),
-                unit_value: dec!(10),
-            }],
+            assets: vec![
+                Asset {
+                    id: 1,
+                    name: "bitcoin".to_string(),
+                    unit_value: dec!(10),
+                },
+                Asset {
+                    id: 2,
+                    name: "sem cotação".to_string(),
+                    unit_value: Decimal::ZERO,
+                },
+            ],
             transactions: vec![transaction(); 25],
             // Mais transações no total do que a página devolveu: há próxima.
             transaction_count: 27,
@@ -574,6 +594,8 @@ mod tests {
 
         assert_eq!(view.summary.total_value, dec!(100));
         assert_eq!(view.holdings.len(), 1);
+        // O catálogo administrativo pode conter ativos ainda sem preço, mas a
+        // tela de compra só oferece os negociáveis.
         assert_eq!(view.available_assets.len(), 1);
         assert_eq!(view.transactions.len(), 25);
         assert_eq!(view.page, 1);

@@ -140,13 +140,20 @@ pub struct UnauthenticatedUser {
 
 impl UnauthenticatedUser {
     pub fn new(username: String, password: String) -> Self {
-        Self { username, password }
+        Self {
+            username: username.trim().to_string(),
+            password,
+        }
     }
 
     /// Tenta autenticar este usuário contra o banco. Encapsulamos toda a lógica
     /// aqui (puxar o registro, conferir a hash) para que os endpoints não
     /// precisem conhecer esses detalhes — eles só repassam o `Repository`.
     pub async fn authenticate(&self, repository: &Repository) -> Result<User, AppError> {
+        if self.username.is_empty() || self.password.is_empty() {
+            return Err(AppError::InvalidCredentials);
+        }
+
         // Se o usuário não existe, sinalizamos com um erro próprio: o endpoint o
         // trata para decidir entre login e cadastro.
         let user_record = match repository.get_user_by_name(&self.username).await? {
@@ -175,6 +182,10 @@ impl UnauthenticatedUser {
     /// Cadastra este usuário como novo. Consome `self` para mover os dados direto
     /// para o banco. Gera a hash da senha aqui — o repository nunca vê texto livre.
     pub async fn register(self, repository: &Repository) -> Result<User, AppError> {
+        if !valid_registration(&self.username, &self.password) {
+            return Err(AppError::InvalidRegistration);
+        }
+
         let password_hash = password_auth::generate_hash(&self.password);
 
         match repository.add_user(self.username, password_hash).await {
@@ -190,5 +201,25 @@ impl UnauthenticatedUser {
             }
             Err(error) => Err(AppError::Database(error)),
         }
+    }
+}
+
+fn valid_registration(username: &str, password: &str) -> bool {
+    let username_len = username.chars().count();
+    let password_len = password.chars().count();
+    (3..=32).contains(&username_len) && (8..=128).contains(&password_len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_registration;
+
+    #[test]
+    fn registration_requires_a_reasonable_username_and_password() {
+        assert!(valid_registration("alice", "correct horse"));
+        assert!(!valid_registration("ab", "correct horse"));
+        assert!(!valid_registration("alice", "short"));
+        assert!(!valid_registration(&"a".repeat(33), "correct horse"));
+        assert!(!valid_registration("alice", &"x".repeat(129)));
     }
 }

@@ -1,0 +1,252 @@
+{% import "market_macros.html" as ui %}
+{#
+  Painel de mercado. É o MESMO fragmento nos dois caminhos: embutido pela
+  página completa e devolvido sozinho nas requisições do htmx.
+
+  A tela tem duas regiões que se atualizam por conta própria, e os atributos
+  `hx-*` que as coordenam ficam aqui no topo, herdados por tudo que estiver
+  dentro (o htmx resolve cada atributo pelo ancestral mais próximo):
+
+    * `#market-detail` — o painel da moeda selecionada, alvo da troca.
+    * `#market-list`   — a lista lateral, trocada FORA DE BANDA na mesma
+                         resposta.
+    * `#market-state`  — os campos ocultos do formulário de busca. Eles ficam
+                         num cartão que nenhuma troca substitui, então
+                         precisam vir junto: sem isso, buscar depois de trocar
+                         de moeda mandaria o servidor a moeda ANTERIOR.
+
+  Trocar só esses nós (e não a tela inteira) é o que preserva a barra de
+  rolagem da lista e o foco do campo de busca: os dois vivem em elementos que
+  nenhuma troca substitui. Sem JavaScript nada disso é necessário — cada link
+  carrega o estado inteiro na própria URL e a navegação clássica funciona.
+#}
+{% if let Some(coin) = market.selected %}
+<div id="market"
+     class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_23rem]"
+     hx-target="#market-detail" hx-swap="outerHTML"
+     hx-select="#market-detail" hx-select-oob="#market-list,#market-state">
+
+    {#
+      O painel se repõe sozinho a cada 60 s — a cadência da fonte, que
+      recalcula nesse intervalo. A URL já carrega o estado inteiro da tela
+      (moeda, período e busca), então a atualização automática devolve
+      exatamente o que está à vista, com números novos.
+    #}
+    <section id="market-detail" class="min-w-0 space-y-4"
+             hx-get="{{ market.state_url }}" hx-trigger="every 60s">
+
+        <article class="rounded-2xl border border-hairline bg-surface p-6 sm:p-8">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="flex min-w-0 items-center gap-3">
+                    <span aria-hidden="true" class="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-raised px-1 text-[11px] font-semibold tracking-tight text-accent-soft">{{ coin.symbol }}</span>
+                    <div class="min-w-0">
+                        <h2 class="truncate text-lg font-semibold tracking-tight">{{ coin.name }}</h2>
+                        <p class="mt-0.5 flex items-center gap-2 text-xs text-ink-3">
+                            <span class="tabular-nums">{{ coin.symbol }}/BRL</span>
+                            <span class="rounded-md bg-raised px-1.5 py-0.5 font-medium tabular-nums text-ink-2"><span class="sr-only">{{ market.t.market_rank }} </span>#{{ coin.rank }}</span>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="text-right text-xs text-ink-3">
+                    {% if let Some(updated_at) = market.updated_at %}
+                    <p>{{ market.t.market_updated_at }} {{ updated_at|human_datetime }} UTC</p>
+                    {% endif %}
+                    {% if market.refresh_failed %}
+                    <p role="status">{{ market.t.market_stale }}</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Número-herói da tela: a cotação da moeda em foco. A variação
+                 sai ao lado com seta e sinal, nunca só com cor. -->
+            <div class="mt-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <p class="text-4xl font-semibold tracking-tight sm:text-5xl">{{ coin.price|market_price }}</p>
+                {% call ui::pct(coin.change_24h, "text-sm font-medium") %}{% endcall %}
+                <span class="text-xs text-ink-3">{{ market.t.market_change_24h }}</span>
+            </div>
+
+            {#
+              Medidor da faixa de negociação. É geometria de SVG, não largura
+              em CSS: a CSP fecha `style-src` em `'self'`, então `style="width:
+              63%"` simplesmente não existe nesta interface.
+            #}
+            {% if let Some(marker) = coin.trading_range_x() %}
+            <div class="mt-7">
+                <p class="text-xs text-ink-3">{{ market.t.market_trading_range }}</p>
+                {#
+                  `preserveAspectRatio="none"` + altura fixa: o medidor tem de
+                  ter a mesma espessura em qualquer largura de tela. Por isso
+                  o marcador é uma barra, e não um círculo — retângulo esticado
+                  continua retângulo, círculo esticado vira ovo.
+                #}
+                <svg viewBox="0 0 600 12" preserveAspectRatio="none" class="mt-2 h-3 w-full text-accent" role="img" aria-label="{{ market.t.market_trading_range }}">
+                    <line x1="10" y1="6" x2="590" y2="6" class="stroke-hairline" stroke-width="4" />
+                    <line x1="10" y1="6" x2="{{ marker }}" y2="6" stroke="currentColor" stroke-opacity="0.45" stroke-width="4" />
+                    <rect x="{{ marker }}" y="0" width="6" height="12" fill="currentColor" />
+                </svg>
+                {# Empilhado no celular: lado a lado, os dois valores quebram
+                   no meio do "R$". #}
+                <div class="mt-1.5 flex flex-col gap-1 text-xs text-ink-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+                    <span>{{ market.t.market_low_24h }} <span class="tabular-nums text-ink-2">{{ coin.low_24h|market_price }}</span></span>
+                    <span>{{ market.t.market_high_24h }} <span class="tabular-nums text-ink-2">{{ coin.high_24h|market_price }}</span></span>
+                </div>
+            </div>
+            {% endif %}
+        </article>
+
+        <!-- Gráfico temporal da moeda selecionada. A série é horária e vem no
+             mesmo pedido da lista, então trocar de moeda ou de janela não
+             custa nenhuma chamada à fonte. -->
+        <article class="rounded-2xl border border-hairline bg-surface p-6">
+            <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-sm font-semibold text-ink-2">{{ market.t.market_chart_title }}</h3>
+                    <p class="mt-0.5 text-xs text-ink-3">{{ coin.symbol }}/BRL · {{ market.t.market_chart_source }}</p>
+                </div>
+                <nav aria-label="{{ market.t.market_period }}" class="flex items-center gap-0.5 rounded-lg border border-hairline p-0.5 text-xs">
+                    <a href="{{ market.day_url }}" hx-get="{{ market.day_url }}" hx-push-url="true"
+                       {% if market.is_day() %}aria-current="true" class="rounded-md bg-raised px-2.5 py-1 font-semibold text-ink"{% else %}class="rounded-md px-2.5 py-1 text-ink-3 transition hover:text-ink"{% endif %}>{{ market.t.market_period_day }}</a>
+                    <a href="{{ market.week_url }}" hx-get="{{ market.week_url }}" hx-push-url="true"
+                       {% if market.is_week() %}aria-current="true" class="rounded-md bg-raised px-2.5 py-1 font-semibold text-ink"{% else %}class="rounded-md px-2.5 py-1 text-ink-3 transition hover:text-ink"{% endif %}>{{ market.t.market_period_week }}</a>
+                </nav>
+            </div>
+
+            {% if let Some(chart) = market.chart %}
+            <svg viewBox="{{ chart.view_box }}" class="w-full {% if chart.is_up() %}text-up{% else if chart.is_down() %}text-down{% else %}text-accent-soft{% endif %}" role="img" aria-label="{{ market.t.market_chart_aria }}">
+                <defs>
+                    <linearGradient id="market-wash" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="currentColor" stop-opacity="0.16" />
+                        <stop offset="100%" stop-color="currentColor" stop-opacity="0" />
+                    </linearGradient>
+                </defs>
+                {% for y in chart.grid %}
+                <line x1="{{ chart.plot_left }}" y1="{{ y }}" x2="{{ chart.plot_right }}" y2="{{ y }}" class="stroke-hairline" stroke-width="1" />
+                {% endfor %}
+                <path d="{{ chart.area }}" fill="url(#market-wash)" />
+                <path d="{{ chart.line }}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                <circle cx="{{ chart.last_x }}" cy="{{ chart.last_y }}" r="5" fill="currentColor" class="stroke-surface" stroke-width="2" />
+            </svg>
+
+            {#
+              Eixo do tempo (hora na janela de 24 h, data na de 7 d). Fica em
+              HTML, e não em `<text>` dentro do SVG, porque o desenho escala
+              com a largura da tela e a tipografia não pode escalar junto: num
+              celular o rótulo viraria uma mancha de 5 px. As marcas são
+              equidistantes, então `justify-between` as põe exatamente sobre as
+              amostras que datam.
+            #}
+            {% if !chart.ticks.is_empty() %}
+            <div class="mt-1 flex justify-between text-[11px] tabular-nums text-ink-3">
+                {% for tick in chart.ticks %}
+                <span>{{ tick }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-xs tabular-nums text-ink-3">
+                <span>{{ market.t.chart_min }} {{ chart.min|market_price }}</span>
+                <span>
+                    {{ market.t.market_open }} <span class="text-ink-2">{{ chart.open|market_price }}</span>
+                    {% if let Some(pct) = chart.delta_pct %}{% call ui::pct(pct, "ml-1 font-medium") %}{% endcall %}{% endif %}
+                </span>
+                <span>{{ market.t.chart_max }} {{ chart.max|market_price }}</span>
+            </div>
+            {% else %}
+            <p class="py-12 text-center text-sm text-ink-3" role="status">{{ market.t.market_chart_unavailable }}</p>
+            {% endif %}
+        </article>
+
+        <section class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {% call ui::pct_tile(market.t.market_change_1h, coin.change_1h) %}{% endcall %}
+            {% call ui::pct_tile(market.t.market_change_7d, coin.change_7d) %}{% endcall %}
+            {% call ui::tile(market.t.market_market_cap, market.compact_brl(coin.market_cap)) %}{% endcall %}
+            {% call ui::tile(market.t.market_volume_24h, market.compact_brl(coin.volume_24h)) %}{% endcall %}
+            {% call ui::tile(market.t.market_supply, market.compact_units(coin.circulating_supply)) %}{% endcall %}
+
+            <div class="rounded-2xl border border-hairline bg-surface p-4">
+                <p class="text-xs text-ink-3">{{ market.t.market_ath }}</p>
+                <p class="mt-1.5 text-base font-semibold tabular-nums">{% if coin.ath|positive %}{{ coin.ath|market_price }}{% else %}—{% endif %}</p>
+                {% if coin.ath|positive %}
+                <p class="mt-1 text-xs text-ink-3">{% call ui::pct(coin.ath_change_pct, "font-medium") %}{% endcall %} {{ market.t.market_from_ath }}</p>
+                {% endif %}
+            </div>
+        </section>
+    </section>
+
+    {#
+      A "lista de todas as moedas": cartão fixo à direita, com rolagem própria.
+      O contêiner que rola NUNCA é trocado — só o `<ul>` de dentro —, então a
+      posição da barra sobrevive às atualizações automáticas.
+    #}
+    <aside class="min-w-0 lg:sticky lg:top-6">
+        <div class="flex max-h-[34rem] flex-col overflow-hidden rounded-2xl border border-hairline bg-surface lg:max-h-[calc(100vh-3rem)]">
+            <div class="border-b border-hairline p-4">
+                <h2 class="text-sm font-semibold text-ink-2">{{ market.t.market_list_title }}</h2>
+                <p class="mt-0.5 text-xs text-ink-3">{{ market.t.market_list_hint }}</p>
+
+                {#
+                  Busca do lado do servidor: com htmx, cada tecla (com 300 ms
+                  de espera) atualiza a lista; sem htmx, o mesmo formulário
+                  recarrega a página com o mesmo resultado. O campo fica FORA
+                  das regiões trocadas — por isso não perde foco nem texto no
+                  caminho.
+
+                  Quem carrega o `hx-get` é o FORMULÁRIO, não o campo: numa
+                  requisição GET o htmx envia os valores do elemento que
+                  dispara, e só o formulário traz junto a moeda e o período
+                  escondidos aqui — pelo campo sozinho, buscar jogaria a tela
+                  de volta para a primeira moeda do ranking.
+                #}
+                <form action="/market" method="get" role="search" class="mt-3"
+                      hx-get="/market" hx-trigger="submit, input delay:300ms, search delay:300ms">
+                    <span id="market-state">
+                        <input type="hidden" name="coin" value="{{ coin.id }}" />
+                        <input type="hidden" name="range" value="{{ market.range.tag() }}" />
+                    </span>
+                    <label for="market-search" class="sr-only">{{ market.t.market_search_label }}</label>
+                    <input id="market-search" name="q" type="search" value="{{ market.query }}" autocomplete="off"
+                           placeholder="{{ market.t.market_search_placeholder }}"
+                           class="w-full rounded-xl border border-hairline bg-plane px-3 py-2 text-sm text-ink outline-none transition placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/40" />
+                    <button type="submit" class="sr-only">{{ market.t.market_search_submit }}</button>
+                </form>
+            </div>
+
+            <div class="min-h-0 flex-1 overflow-y-auto">
+                <ul id="market-list">
+                    {% if market.coins.is_empty() %}
+                    <li class="px-4 py-10 text-center text-sm text-ink-3" role="status">{{ market.t.market_no_results }}</li>
+                    {% endif %}
+                    {% for row in market.coins %}
+                    <li>
+                        <a href="{{ market.coin_url(row) }}" hx-get="{{ market.coin_url(row) }}" hx-push-url="true"
+                           {% if market.is_selected(row) %}aria-current="true" class="flex items-center gap-2.5 border-l-2 border-accent bg-raised px-3.5 py-2.5"{% else %}class="flex items-center gap-2.5 border-l-2 border-transparent px-3.5 py-2.5 transition hover:bg-raised"{% endif %}>
+                            <span aria-hidden="true" class="w-6 shrink-0 text-right text-[11px] tabular-nums text-ink-3">{{ row.rank }}</span>
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate text-sm font-medium">{{ row.symbol }}</span>
+                                <span class="block truncate text-xs text-ink-3">{{ row.name }}</span>
+                            </span>
+                            <span class="shrink-0 text-right">
+                                <span class="block text-sm tabular-nums">{{ row.price|market_price }}</span>
+                                <span class="block text-xs tabular-nums">{% call ui::pct(row.change_24h, "") %}{% endcall %}</span>
+                            </span>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </aside>
+</div>
+{% else %}
+{#
+  Antes da primeira rodada do job não há painel para desenhar. A tela se
+  reconstrói inteira assim que o snapshot chega — por isso este ramo troca o
+  `#market` completo, e não as duas regiões de dentro, que ainda não existem.
+#}
+<div id="market" hx-get="/market" hx-trigger="every 15s" hx-target="#market" hx-select="#market" hx-swap="outerHTML">
+    <p class="rounded-2xl border border-hairline bg-raised px-5 py-16 text-center text-sm text-ink-3" role="status">
+        {% if market.refresh_failed %}{{ market.t.market_unavailable }}{% else %}{{ market.t.market_loading }}{% endif %}
+    </p>
+</div>
+{% endif %}

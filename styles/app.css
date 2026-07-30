@@ -47,7 +47,8 @@
     /* Tinta */
     --color-ink: #ffffff;
     --color-ink-2: #c3c2b7;
-    --color-ink-3: #898781;
+    /* 5,14:1 sobre `raised` — acima do AA para texto pequeno. */
+    --color-ink-3: #96938f;
 
     /* Marca */
     --color-accent: #9085e9;

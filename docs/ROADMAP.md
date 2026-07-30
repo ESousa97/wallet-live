@@ -53,7 +53,7 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   `style-src` fecham em `'self'`, com teste travando o invariante de que
   nenhuma página emite `<style>`/`<script>` inline.
 
-## 🏗️ Fase 3 — Arquitetura e API
+## ✅ Fase 3 — Arquitetura e API
 
 - [x] Paginação real do extrato (`/assets?page=N`, ordem estável, navegação na
   interface).
@@ -136,3 +136,13 @@ só avança de fase quando o anterior tem rede de testes cobrindo o comportament
   `?next=` validado contra open redirect) > `Accept-Language` > pt-BR; flashes
   de sucesso e de erro de negócio acompanham. Moeda, datas e CSV ficam na
   convenção do dado (BRL/planilha pt-BR), não da interface.
+- [x] Mercado informativo: 100 maiores criptomoedas em BRL, atualização
+  automática por snapshot em memória, precisão adaptativa para preços abaixo
+  de R$ 1, estado de indisponibilidade/defasagem e direção indicada por
+  seta+sinal além da cor.
+- [x] Instalação demonstrável: a primeira sincronização cria o catálogo mínimo
+  com preços reais, ativos sem cotação não podem ser comprados ou vendidos por
+  zero e o estado vazio oferece a próxima ação.
+- [x] Acabamento de entrega: sessão expirada em htmx redireciona a página
+  inteira, respostas privadas usam `no-store`, SIGTERM participa do shutdown
+  gracioso e o roteiro de avaliação está documentado em `ENTREGA.md`.

@@ -1,17 +1,8 @@
-mod app;
-pub mod auth;
-mod config;
-mod error;
-pub mod i18n;
-pub mod models;
-mod quotes;
-pub mod repository;
-pub mod routes;
-pub mod services;
-
 // A main fica o mais enxuta possível: o tokio::main cria um runtime assíncrono
-// e tudo o que governa o serviço vive em `App::start`.
+// e tudo o que governa o serviço vive em `App::start` — dentro da biblioteca
+// (`src/lib.rs`), para que a suíte de integração em `tests/` possa importar os
+// mesmos módulos que o servidor executa.
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    app::App::start().await
+    wallet::app::App::start().await
 }

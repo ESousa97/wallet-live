@@ -113,6 +113,43 @@ impl Repository {
         Ok(result.rows_affected() as usize)
     }
 
+    /// Garante que um ativo de mercado exista sem duplicar um alias já
+    /// cadastrado. É usado pela primeira sincronização de cotações para deixar
+    /// uma instalação nova demonstrável sem gravar preços fictícios em uma
+    /// migration: o ativo só nasce quando há uma cotação real e positiva.
+    pub async fn ensure_market_asset(
+        &self,
+        canonical_name: &str,
+        aliases: &[&str],
+        unit_value: Decimal,
+    ) -> Result<bool, AppError> {
+        let unit_value = validated_unit_value(unit_value)?;
+        if unit_value.is_zero() {
+            return Err(AppError::QuoteUnavailable);
+        }
+
+        let aliases: Vec<String> = aliases.iter().map(|alias| alias.to_string()).collect();
+        let result = sqlx::query(
+            r#"
+            INSERT INTO assets (name, unit_value)
+            SELECT $1, $2
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM assets
+                WHERE LOWER(TRIM(name)) = ANY($3::text[])
+            )
+            ON CONFLICT (name) DO NOTHING
+            "#,
+        )
+        .bind(canonical_name)
+        .bind(unit_value)
+        .bind(&aliases)
+        .execute(&self.db)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn add_user(
         &self,
         username: String,
@@ -435,10 +472,16 @@ impl Repository {
 
         let mut tx = self.db.begin().await?;
         let asset = asset_for_update(&mut tx, asset_id).await?;
+        if asset.unit_value <= Decimal::ZERO {
+            return Err(AppError::QuoteUnavailable);
+        }
         // Arredonda o movimento de caixa para a escala canônica: preço e
         // quantidade já são ≤ 8 casas, mas o produto pode chegar a 16 — e o
         // saldo/extrato devem manter o invariante de `MONEY_SCALE`.
         let cost = (asset.unit_value * quantity).round_dp(MONEY_SCALE);
+        if cost <= Decimal::ZERO {
+            return Err(AppError::TradeTooSmall);
+        }
 
         let user = sqlx::query!(
             "SELECT balance FROM users WHERE id = $1 FOR UPDATE",
@@ -505,6 +548,9 @@ impl Repository {
 
         let mut tx = self.db.begin().await?;
         let asset = asset_for_update(&mut tx, asset_id).await?;
+        if asset.unit_value <= Decimal::ZERO {
+            return Err(AppError::QuoteUnavailable);
+        }
 
         let holding = sqlx::query!(
             "SELECT quantity FROM holdings WHERE user_id = $1 AND asset_id = $2 FOR UPDATE",
@@ -520,6 +566,9 @@ impl Repository {
         }
 
         let proceeds = (asset.unit_value * quantity).round_dp(MONEY_SCALE);
+        if proceeds <= Decimal::ZERO {
+            return Err(AppError::TradeTooSmall);
+        }
 
         sqlx::query!(
             "UPDATE users SET balance = balance + $2 WHERE id = $1",
@@ -575,14 +624,15 @@ fn validated_asset_name(name: String) -> Result<String, AppError> {
     Ok(name)
 }
 
-/// Um preço nunca pode ser negativo (zero é permitido: ativo ainda sem cotação).
-/// Preço negativo inverteria a matemática da carteira — uma "compra" creditaria
-/// saldo. O banco tem um CHECK equivalente como última linha de defesa.
+/// Um preço nunca pode ser negativo (zero é permitido no catálogo para
+/// representar um ativo ainda sem cotação). Também arredondamos toda escrita
+/// administrativa para a escala canônica: sem isso a API poderia reintroduzir
+/// valores que os agregados financeiros não conseguem decodificar.
 fn validated_unit_value(unit_value: Decimal) -> Result<Decimal, AppError> {
     if unit_value < Decimal::ZERO {
         return Err(AppError::NegativeUnitValue);
     }
-    Ok(unit_value)
+    Ok(unit_value.round_dp(MONEY_SCALE))
 }
 
 async fn asset_for_update(
@@ -1070,6 +1120,24 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn admin_prices_are_capped_at_the_canonical_scale(db: PgPool) {
+        let repo = Repository::from(db);
+
+        let asset = repo
+            .create_asset("bitcoin".to_string(), dec!(1.123456789))
+            .await
+            .expect("create asset");
+        assert_eq!(asset.unit_value, dec!(1.12345679));
+
+        let asset = repo
+            .update_asset(asset.id, None, Some(dec!(9.876543219)))
+            .await
+            .expect("update asset")
+            .expect("known asset");
+        assert_eq!(asset.unit_value, dec!(9.87654322));
+    }
+
+    #[sqlx::test]
     async fn asset_name_is_trimmed_on_write(db: PgPool) {
         let repo = Repository::from(db);
 
@@ -1079,6 +1147,100 @@ mod tests {
             .expect("create asset");
 
         assert_eq!(asset.name, "bitcoin");
+    }
+
+    #[sqlx::test]
+    async fn unquoted_assets_cannot_be_bought_or_sold_for_free(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "bitcoin", dec!(0)).await;
+        repo.deposit(uid, dec!(100)).await.unwrap();
+
+        assert!(matches!(
+            repo.buy_asset(uid, aid, dec!(1)).await,
+            Err(AppError::QuoteUnavailable)
+        ));
+
+        // Abre uma posição com preço válido e depois simula a perda da
+        // cotação. Vender por zero também precisa ser bloqueado.
+        repo.update_asset(aid, None, Some(dec!(10))).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(1)).await.unwrap();
+        repo.update_asset(aid, None, Some(dec!(0))).await.unwrap();
+
+        assert!(matches!(
+            repo.sell_asset(uid, aid, dec!(1)).await,
+            Err(AppError::QuoteUnavailable)
+        ));
+        assert_eq!(
+            repo.list_holdings(uid).await.unwrap()[0].quantity_owned,
+            dec!(1)
+        );
+    }
+
+    #[sqlx::test]
+    async fn trades_that_round_to_zero_do_not_move_cash_or_holdings(db: PgPool) {
+        let repo = Repository::from(db);
+        let uid = new_user(&repo, "alice").await;
+        let aid = new_asset(&repo, "micro", dec!(0.00000001)).await;
+        repo.deposit(uid, dec!(1)).await.unwrap();
+
+        assert!(matches!(
+            repo.buy_asset(uid, aid, dec!(0.00000001)).await,
+            Err(AppError::TradeTooSmall)
+        ));
+        assert!(repo.list_holdings(uid).await.unwrap().is_empty());
+        assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(1));
+
+        // Cria uma posição válida e reduz a cotação para que a venda tentada
+        // também tenha total abaixo da menor unidade monetária suportada.
+        repo.update_asset(aid, None, Some(dec!(1))).await.unwrap();
+        repo.buy_asset(uid, aid, dec!(1)).await.unwrap();
+        repo.update_asset(aid, None, Some(dec!(0.00000001)))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            repo.sell_asset(uid, aid, dec!(0.00000001)).await,
+            Err(AppError::TradeTooSmall)
+        ));
+        assert_eq!(
+            repo.list_holdings(uid).await.unwrap()[0].quantity_owned,
+            dec!(1)
+        );
+        assert_eq!(repo.wallet_summary(uid).await.unwrap().balance, dec!(0));
+    }
+
+    #[sqlx::test]
+    async fn market_bootstrap_inserts_once_and_respects_existing_aliases(db: PgPool) {
+        let repo = Repository::from(db);
+        let aliases = ["bitcoin", "btc"];
+
+        assert!(
+            repo.ensure_market_asset("bitcoin", &aliases, dec!(500000))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !repo
+                .ensure_market_asset("bitcoin", &aliases, dec!(510000))
+                .await
+                .unwrap()
+        );
+
+        // Um catálogo que já usa o alias "BTC" não deve ganhar uma segunda
+        // linha chamada "bitcoin".
+        let eth_aliases = ["ethereum", "eth"];
+        new_asset(&repo, "ETH", dec!(10)).await;
+        assert!(
+            !repo
+                .ensure_market_asset("ethereum", &eth_aliases, dec!(20000))
+                .await
+                .unwrap()
+        );
+
+        let assets = repo.list_assets().await.unwrap();
+        assert_eq!(assets.len(), 2);
+        assert_eq!(assets[0].unit_value, dec!(500000));
     }
 
     #[sqlx::test]

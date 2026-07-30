@@ -1,11 +1,62 @@
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::collections::HashMap;
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::app::AppState;
 use crate::error::AppError;
 use crate::repository::Repository;
+
+const RATES_URL: &str = "https://api.coinbase.com/v2/exchange-rates?currency=BRL";
+const USER_AGENT: &str = concat!("wallet/", env!("CARGO_PKG_VERSION"));
+const MANUAL_SYNC_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// Serializa as sincronizações globais e impede que o botão da interface seja
+/// usado para martelar a API externa. O mutex fica adquirido durante a rodada:
+/// duas requisições simultâneas nunca geram duas chamadas nem dois snapshots.
+#[derive(Default)]
+pub struct QuoteSync {
+    last_finished: Mutex<Option<Instant>>,
+}
+
+impl QuoteSync {
+    pub async fn run(
+        &self,
+        repository: &Repository,
+        respect_manual_cooldown: bool,
+    ) -> Result<usize, AppError> {
+        let mut last_finished = self.last_finished.lock().await;
+
+        if respect_manual_cooldown
+            && last_finished
+                .as_ref()
+                .is_some_and(|last| last.elapsed() < MANUAL_SYNC_COOLDOWN)
+        {
+            return Err(AppError::QuoteSyncTooSoon);
+        }
+
+        let result = sync_quotes_round(repository).await;
+        *last_finished = Some(Instant::now());
+        result
+    }
+}
+
+/// Cliente único com timeout explícito: uma indisponibilidade da Coinbase não
+/// pode deixar o botão nem o job agendado pendurados indefinidamente.
+fn client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .timeout(Duration::from_secs(15))
+            .build()
+            .expect("cliente HTTP de cotações")
+    })
+}
 
 /// Sobe o job periódico de cotações: uma rodada imediata no boot e depois uma a
 /// cada `QUOTES_SYNC_MINUTES` (zero desliga). Falha de rodada é logada e a
@@ -24,7 +75,7 @@ pub fn spawn_scheduled_sync(state: AppState) {
         loop {
             // O primeiro tick resolve na hora: o boot já sincroniza.
             interval.tick().await;
-            match sync_quotes_round(&repository).await {
+            match state.quote_sync.run(&repository, false).await {
                 Ok(updated) => info!(assets_updated = updated, "scheduled quotes sync"),
                 Err(error) => warn!(?error, "scheduled quotes sync failed"),
             }
@@ -53,12 +104,12 @@ struct CoinbaseRates {
 
 /// Pares suportados: código na API de câmbio → nomes de ativo que casam no
 /// catálogo (normalizados para minúsculas pelo repository).
-const MARKET_PAIRS: &[(&str, &[&str])] = &[
-    ("USD", &["dolar", "dólar", "usd"]),
-    ("EUR", &["euro", "eur"]),
-    ("BTC", &["bitcoin", "btc"]),
-    ("ETH", &["ethereum", "eth"]),
-    ("SOL", &["solana", "sol"]),
+pub const MARKET_PAIRS: &[(&str, &str, &[&str])] = &[
+    ("USD", "dólar", &["dolar", "dólar", "usd"]),
+    ("EUR", "euro", &["euro", "eur"]),
+    ("BTC", "bitcoin", &["bitcoin", "btc"]),
+    ("ETH", "ethereum", &["ethereum", "eth"]),
+    ("SOL", "solana", &["solana", "sol"]),
 ];
 
 /// Atualiza os preços do catálogo com as cotações de mercado. UMA chamada só:
@@ -72,8 +123,14 @@ pub async fn sync_market_quotes(repository: &Repository) -> Result<usize, AppErr
     updates.insert("real", Decimal::ONE);
     updates.insert("brl", Decimal::ONE);
 
-    for (code, names) in MARKET_PAIRS {
+    for (code, canonical_name, names) in MARKET_PAIRS {
         if let Some(price) = brl_price(&rates, code) {
+            // Numa instalação vazia, a primeira cotação bem-sucedida cria o
+            // catálogo mínimo com preços reais. Um alias já cadastrado pelo
+            // admin é respeitado e não ganha uma linha duplicada.
+            repository
+                .ensure_market_asset(canonical_name, names, price)
+                .await?;
             for name in *names {
                 updates.insert(name, price);
             }
@@ -85,12 +142,32 @@ pub async fn sync_market_quotes(repository: &Repository) -> Result<usize, AppErr
 
 /// Todas as taxas partindo do BRL (BRL→moeda) numa requisição.
 async fn fetch_brl_rates() -> Result<HashMap<String, Decimal>, AppError> {
-    let response: CoinbaseRatesResponse =
-        reqwest::get("https://api.coinbase.com/v2/exchange-rates?currency=BRL")
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+    let body = client()
+        .get(RATES_URL)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+
+    parse_brl_rates(&body)
+}
+
+/// Decodifica o corpo da resposta de câmbio no mapa moeda → taxa BRL→moeda.
+///
+/// **Por que é uma função pública separada do `fetch`.** O ponto mais delicado
+/// desta integração está justamente na decodificação: a Coinbase entrega cada
+/// taxa como **string**, e strings com precisão arbitrária — na captura
+/// versionada em `tests/payloads/coinbase_exchange_rates.json` há taxa com 41
+/// dígitos significativos, mais que os 28 da mantissa do `Decimal`. E o mapa é
+/// decodificado de uma vez: uma única taxa que não caiba derruba a resposta
+/// inteira, e com ela a sincronização de TODOS os pares.
+///
+/// Testar isso com um `HashMap` montado à mão prova apenas que a inversão
+/// funciona; não prova que a resposta de hoje decodifica. O teste de contrato em
+/// `tests/payload_quotes.rs` atravessa esta função com o corpo real.
+pub fn parse_brl_rates(body: &str) -> Result<HashMap<String, Decimal>, AppError> {
+    let response: CoinbaseRatesResponse = serde_json::from_str(body)?;
 
     Ok(response.data.rates)
 }
@@ -102,7 +179,7 @@ async fn fetch_brl_rates() -> Result<HashMap<String, Decimal>, AppError> {
 /// preenche a mantissa inteira (28 dígitos), e um preço com escala 28 gravado
 /// no banco torna os produtos/somas do resumo da carteira indecodificáveis na
 /// volta (foi exatamente o incidente do 500 em /assets).
-fn brl_price(rates: &HashMap<String, Decimal>, code: &str) -> Option<Decimal> {
+pub fn brl_price(rates: &HashMap<String, Decimal>, code: &str) -> Option<Decimal> {
     let rate = rates.get(code)?;
     if *rate <= Decimal::ZERO {
         return None;

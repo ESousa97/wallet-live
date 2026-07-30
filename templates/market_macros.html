@@ -1,0 +1,37 @@
+{#
+  Blocos que se repetem no painel de mercado.
+
+  Eles vivem num arquivo importado para que a regra de acessibilidade tenha UM
+  lugar só: verde e vermelho medem ΔE ~4,6 sob deuteranopia, então a direção de
+  uma variação NUNCA pode ser comunicada só por cor. Toda variação sai com seta
+  E sinal — a cor é o canal redundante. Mexer aqui muda a tela inteira de uma
+  vez; é de propósito.
+#}
+
+{# Variação percentual assinada. `extra` empilha as classes de tamanho/peso que
+   o chamador quiser, para que a cor continue sendo a única decisão daqui. #}
+{% macro pct(value, extra) %}
+{%- if value|positive -%}
+<span class="{{ extra }} text-up"><span aria-hidden="true">▲</span> +{{ value|percent }}%</span>
+{%- else if value|negative -%}
+<span class="{{ extra }} text-down"><span aria-hidden="true">▼</span> −{{ value|percent }}%</span>
+{%- else -%}
+<span class="{{ extra }} text-ink-3">0,00%</span>
+{%- endif -%}
+{% endmacro %}
+
+{# Indicador do painel: rótulo em cima, número embaixo. #}
+{% macro tile(label, value) %}
+<div class="rounded-2xl border border-hairline bg-surface p-4">
+    <p class="text-xs text-ink-3">{{ label }}</p>
+    <p class="mt-1.5 text-base font-semibold tabular-nums">{{ value }}</p>
+</div>
+{% endmacro %}
+
+{# Mesmo indicador, quando o número é uma variação. #}
+{% macro pct_tile(label, value) %}
+<div class="rounded-2xl border border-hairline bg-surface p-4">
+    <p class="text-xs text-ink-3">{{ label }}</p>
+    <p class="mt-1.5 text-base font-semibold tabular-nums">{% call pct(value, "") %}{% endcall %}</p>
+</div>
+{% endmacro %}

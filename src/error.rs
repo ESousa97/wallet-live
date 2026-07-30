@@ -17,8 +17,12 @@ pub enum AppError {
     UserDoesNotExist,
     #[error("username already taken")]
     UsernameTaken,
+    #[error("username or password does not meet the registration requirements")]
+    InvalidRegistration,
     #[error("invalid amount")]
     InvalidAmount,
+    #[error("trade total is below the supported monetary precision")]
+    TradeTooSmall,
     #[error("too many failed attempts, try again later")]
     TooManyAttempts,
     #[error("invalid csrf token")]
@@ -33,6 +37,8 @@ pub enum AppError {
     InsufficientHoldings,
     #[error("market quote unavailable")]
     QuoteUnavailable,
+    #[error("quotes were refreshed recently")]
+    QuoteSyncTooSoon,
     // `transparent` delega Display/source ao erro interno; `#[from]` gera a
     // conversão automática, então um erro de SQLx vira AppError com `?`.
     #[error(transparent)]
@@ -49,6 +55,16 @@ pub enum AppError {
     Jwt(String),
     #[error(transparent)]
     Http(#[from] reqwest::Error),
+    // Resposta de terceiro que não casa com o formato que esperamos: campo
+    // ausente, tipo trocado, número que não cabe no `Decimal`. É falha DELES,
+    // não nossa, e por isso responde 502 como qualquer indisponibilidade da
+    // fonte — mas com a mensagem do serde no log, que diz linha e coluna do
+    // corpo. Ter esta variante separada de `Http` é o que permite decodificar
+    // um payload sem rede (ver `market::parse_markets` e
+    // `quotes::parse_brl_rates`, que a suíte de `tests/` atravessa com as
+    // respostas reais versionadas em `tests/payloads/`).
+    #[error("upstream payload does not match the expected shape: {0}")]
+    Payload(#[from] serde_json::Error),
 }
 
 impl From<jwt_simple::Error> for AppError {
@@ -74,7 +90,9 @@ impl IntoResponse for AppError {
             AppError::UserDoesNotExist => StatusCode::NOT_FOUND,
             // O nome já está em uso: erro do cliente.
             AppError::UsernameTaken => StatusCode::BAD_REQUEST,
+            AppError::InvalidRegistration => StatusCode::BAD_REQUEST,
             AppError::InvalidAmount => StatusCode::BAD_REQUEST,
+            AppError::TradeTooSmall => StatusCode::BAD_REQUEST,
             // Lockout de força bruta no login.
             AppError::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
             // Token CSRF ausente ou divergente: a requisição não veio de um
@@ -85,6 +103,7 @@ impl IntoResponse for AppError {
             AppError::InsufficientBalance => StatusCode::BAD_REQUEST,
             AppError::InsufficientHoldings => StatusCode::BAD_REQUEST,
             AppError::QuoteUnavailable => StatusCode::BAD_GATEWAY,
+            AppError::QuoteSyncTooSoon => StatusCode::TOO_MANY_REQUESTS,
             // Algo inesperado aconteceu no banco: erro interno do servidor.
             AppError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
             // Falha ao renderizar template: configuração nossa, erro interno.
@@ -92,6 +111,7 @@ impl IntoResponse for AppError {
             // Token ausente/inválido nas rotas que exigem `User` diretamente.
             AppError::Jwt(_) => StatusCode::UNAUTHORIZED,
             AppError::Http(_) => StatusCode::BAD_GATEWAY,
+            AppError::Payload(_) => StatusCode::BAD_GATEWAY,
         };
 
         // Falhas 5xx são problema NOSSO: registramos o erro completo no servidor

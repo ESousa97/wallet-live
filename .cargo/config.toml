@@ -4,3 +4,14 @@
 # checagem de revogação para os downloads do cargo (não afeta o programa final).
 [http]
 check-revoke = false
+
+# Compila contra o cache `.sqlx/` versionado em vez de abrir conexão com o
+# Postgres. Sem isso, todo `query_as!` vira erro de compilação quando o banco
+# não está de pé — inclusive no rust-analyzer, que passa a acusar o arquivo
+# inteiro em vermelho (`os error 10061`).
+#
+# Entradas de `[env]` não sobrescrevem variáveis já definidas no ambiente,
+# então `cargo sqlx prepare` (que exporta `SQLX_OFFLINE=false`) continua
+# regenerando o cache normalmente.
+[env]
+SQLX_OFFLINE = "true"

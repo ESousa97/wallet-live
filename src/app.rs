@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -30,6 +30,14 @@ pub struct AppState {
     pub db: PgPool,
     pub config: Arc<Config>,
     pub login_throttle: Arc<LoginThrottle>,
+    /// Coordena o job e o botão de cotações para que uma atualização global
+    /// rode por vez e chamadas manuais tenham um pequeno cooldown.
+    pub quote_sync: Arc<crate::quotes::QuoteSync>,
+    /// Snapshot do mercado de criptomoedas, atualizado por um job em segundo
+    /// plano. Fica fora do banco de propósito: é dado de terceiro, volátil e
+    /// puramente informativo — perder no restart não custa nada, e gravar
+    /// misturaria cotação de fora com o catálogo que lastreia as operações.
+    pub market: Arc<crate::market::Market>,
     metrics: RequestMetrics,
 }
 
@@ -45,12 +53,26 @@ impl AppState {
         // que subir contra um schema pela metade.
         sqlx::migrate!().run(&db).await?;
 
-        Ok(Self {
+        Ok(Self::with_pool(db, config))
+    }
+
+    /// Estado a partir de uma pool JÁ pronta (conectada e migrada).
+    ///
+    /// Existe para a suíte de integração em `tests/`: o `#[sqlx::test]` entrega
+    /// um banco efêmero já migrado, então repetir `connect` + `migrate!` ali
+    /// seria trabalho duplicado — e, pior, a suíte precisaria dos segredos de
+    /// ambiente que o `build` exige. Separar as duas coisas é o que permite ao
+    /// teste montar o MESMO `AppState` que a produção monta, com o mesmo
+    /// `metrics` e os mesmos jobs desligados.
+    pub fn with_pool(db: PgPool, config: Arc<Config>) -> Self {
+        Self {
             db,
             config,
             login_throttle: Arc::new(LoginThrottle::default()),
+            quote_sync: Arc::new(crate::quotes::QuoteSync::default()),
+            market: Arc::new(crate::market::Market::default()),
             metrics: RequestMetrics::new(),
-        })
+        }
     }
 }
 
@@ -102,13 +124,40 @@ impl App {
 
         let state = AppState::build(config).await?;
 
-        // Job de cotações em segundo plano (rodada imediata + intervalo).
+        // Jobs em segundo plano (rodada imediata + intervalo). São dois porque
+        // as cadências são diferentes por natureza: o catálogo que lastreia as
+        // operações muda em minutos, a tela de mercado acompanha o cache da
+        // fonte externa, em segundos.
         crate::quotes::spawn_scheduled_sync(state.clone());
+        crate::market::spawn_scheduled_refresh(
+            Arc::clone(&state.market),
+            state.config.market_sync_seconds,
+        );
 
         let listener = TcpListener::bind(bind_addr).await?;
         info!(%bind_addr, "starting service");
 
-        let router = Router::new()
+        // `with_graceful_shutdown` deixa as requisições em voo terminarem quando
+        // chega um Ctrl+C, em vez de cortar conexões no meio.
+        axum::serve(listener, Self::router(state))
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+
+        Ok(())
+    }
+
+    /// A árvore de rotas completa, com todas as camadas na ordem que importa.
+    ///
+    /// Separada de `start` porque `start` faz o que um teste não pode querer —
+    /// instala hooks globais, lê o ambiente, abre socket e fica servindo para
+    /// sempre. Com o router numa função, a suíte de integração exercita
+    /// exatamente a MESMA pilha que a produção serve: os mesmos middlewares, na
+    /// mesma ordem, com os mesmos cabeçalhos de segurança. Um teste que montasse
+    /// o seu próprio router provaria apenas que o handler funciona — e deixaria
+    /// de fora a CSP, a renovação de sessão e o span da requisição, que são
+    /// justamente as camadas que ninguém lembra de conferir à mão.
+    pub fn router(state: AppState) -> Router {
+        Router::new()
             // Sondas separadas: liveness (o processo responde?) nunca depende do
             // banco — reiniciar o app não conserta um banco fora do ar; já a
             // readiness (pode receber tráfego?) exige o banco são. /health fica
@@ -140,15 +189,7 @@ impl App {
             // antes de tudo — assim até os logs dos middlewares internos saem
             // correlacionados ao mesmo id. Também onde a métrica de duração é
             // registrada, pelo mesmo motivo: cobre a requisição inteira.
-            .layer(axum::middleware::from_fn_with_state(state, request_tracing));
-
-        // `with_graceful_shutdown` deixa as requisições em voo terminarem quando
-        // chega um Ctrl+C, em vez de cortar conexões no meio.
-        axum::serve(listener, router)
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
-
-        Ok(())
+            .layer(axum::middleware::from_fn_with_state(state, request_tracing))
     }
 }
 
@@ -320,6 +361,14 @@ async fn request_tracing(State(state): State<AppState>, request: Request, next: 
     // dele, na hora de rotular a métrica com o método/rota da requisição.
     let method = request.method().clone();
     let path = request.uri().path().to_string();
+    let metric_route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|matched| matched.as_str().to_string())
+        // Um 404 não tem `MatchedPath`. Usar a URL recebida aqui criaria uma
+        // série diferente para cada caminho aleatório; o log ainda preserva
+        // `path`, mas a métrica mantém cardinalidade limitada.
+        .unwrap_or_else(|| "<unmatched>".to_string());
 
     let span = tracing::info_span!(
         "request",
@@ -344,7 +393,9 @@ async fn request_tracing(State(state): State<AppState>, request: Request, next: 
         elapsed.as_secs_f64(),
         &[
             KeyValue::new("http.request.method", method.to_string()),
-            KeyValue::new("http.route", path),
+            // A métrica usa o padrão da rota, não o caminho cru, para que ids
+            // e URLs aleatórias não criem cardinalidade ilimitada no backend.
+            KeyValue::new("http.route", metric_route),
             KeyValue::new(
                 "http.response.status_code",
                 i64::from(response.status().as_u16()),
@@ -380,6 +431,7 @@ fn new_request_id() -> String {
 /// - **HSTS** só quando o serviço está atrás de HTTPS (mesmo sinal do cookie
 ///   `Secure`); enviá-lo em HTTP local só causaria confusão.
 async fn security_headers(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let is_static_asset = request.uri().path().starts_with("/static/");
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
 
@@ -401,6 +453,12 @@ async fn security_headers(State(state): State<AppState>, request: Request, next:
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
+    // Login carrega CSRF e as telas/CSV contêm dados privados. Fora dos assets
+    // estáticos, nenhuma resposta deve ficar no cache do navegador, proxy ou
+    // histórico compartilhado.
+    if !is_static_asset {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
 
     if state.config.cookie_secure {
         headers.insert(
@@ -429,9 +487,25 @@ async fn readiness(State(state): State<AppState>) -> StatusCode {
     }
 }
 
-/// Resolve quando o processo recebe um Ctrl+C. Alimenta o desligamento gracioso.
+/// Resolve quando o processo recebe Ctrl+C ou, em Unix, SIGTERM (o sinal usado
+/// por Docker/Kubernetes). Alimenta o desligamento gracioso.
 async fn shutdown_signal() {
-    if tokio::signal::ctrl_c().await.is_ok() {
-        info!("shutdown signal received");
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut terminate =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
     }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+
+    info!("shutdown signal received");
 }

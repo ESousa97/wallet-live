@@ -4,9 +4,9 @@ use askama::Template;
 use axum::Router;
 use axum::extract::{Form, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -21,8 +21,8 @@ use crate::auth::user::{TOKEN_COOKIE, UnauthenticatedUser, User};
 use crate::config::Config;
 use crate::error::AppError;
 use crate::i18n::{Locale, Strings, lang_cookie};
+use crate::market::{Coin, PriceChart, Range};
 use crate::models::{Asset, Holding, Transaction, WalletSummary};
-use crate::quotes::sync_quotes_round;
 use crate::repository::Repository;
 use crate::routes::flash::{Flash, business_flash, set_flash, take_flash};
 use crate::services::portfolio::{EquityChart, PortfolioService, WalletView};
@@ -32,15 +32,17 @@ pub fn router() -> Router<AppState> {
         .route("/", get(index))
         .route("/static/app.css", get(app_css))
         .route("/static/htmx.js", get(htmx_js))
+        .route("/static/money-input.js", get(money_input_js))
         .route("/login", get(login_page).post(login))
         .route("/register", get(register_page).post(register))
         .route("/logout", get(logout))
         .route("/assets", get(assets_page))
+        .route("/market", get(market_page))
         .route("/transactions.csv", get(transactions_csv))
         .route("/deposit", get(deposit_page).post(deposit))
         .route("/buy", get(buy_page).post(buy_asset))
         .route("/sell", get(sell_page).post(sell_asset))
-        .route("/quotes/sync", get(assets_page).post(sync_quotes))
+        .route("/quotes/sync", post(sync_quotes))
         .route("/lang/{code}", get(set_language))
 }
 
@@ -85,14 +87,15 @@ fn sanitized_next(next: Option<&str>) -> &str {
 /// aquele era um compilador rodando no navegador, que injetava `<style>` em
 /// runtime e por isso exigia `'unsafe-inline'` na política.
 #[instrument(skip_all)]
-async fn app_css() -> impl axum::response::IntoResponse {
-    (
-        [
-            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
-            // Um dia de cache: o arquivo só muda quando o binário muda.
-            (header::CACHE_CONTROL, "public, max-age=86400"),
-        ],
-        include_str!("../../static/app.css"),
+async fn app_css(headers: HeaderMap) -> Response {
+    const BODY: &str = include_str!("../../static/app.css");
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+    static_asset(
+        &headers,
+        "text/css; charset=utf-8",
+        BODY,
+        TAG.get_or_init(|| content_tag(BODY)),
     )
 }
 
@@ -102,14 +105,99 @@ async fn app_css() -> impl axum::response::IntoResponse {
 /// de HTML — o servidor segue renderizando tudo (SSR); só muda o quanto de
 /// página viaja e é re-desenhado por operação.
 #[instrument(skip_all)]
-async fn htmx_js() -> impl axum::response::IntoResponse {
-    (
-        [
-            (header::CONTENT_TYPE, "application/javascript"),
-            (header::CACHE_CONTROL, "public, max-age=86400"),
-        ],
-        include_str!("../../static/htmx.js"),
+async fn htmx_js(headers: HeaderMap) -> Response {
+    const BODY: &str = include_str!("../../static/htmx.js");
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+    static_asset(
+        &headers,
+        "application/javascript",
+        BODY,
+        TAG.get_or_init(|| content_tag(BODY)),
     )
+}
+
+/// Máscara monetária do campo de depósito, pelo mesmo motivo dos dois acima:
+/// zero CDN, mesma CSP. Progressive enhancement puro — o campo já funciona
+/// sem este arquivo (ver `static/money-input.js`).
+#[instrument(skip_all)]
+async fn money_input_js(headers: HeaderMap) -> Response {
+    const BODY: &str = include_str!("../../static/money-input.js");
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+    static_asset(
+        &headers,
+        "application/javascript",
+        BODY,
+        TAG.get_or_init(|| content_tag(BODY)),
+    )
+}
+
+/// Política de cache dos assets do binário.
+///
+/// A URL deles é FIXA e o conteúdo muda a cada build — a combinação que torna
+/// um `max-age` longo uma armadilha, não uma otimização: depois de recompilar,
+/// o navegador continua servindo o CSS da versão anterior até o prazo vencer, e
+/// a tela abre com o estilo de outro binário (foi exatamente o que aconteceu
+/// quando a tela de mercado entrou: layout de duas colunas no HTML, CSS antigo
+/// no cache, painel empilhado na tela).
+///
+/// `no-cache` não é "não guarde" — é "guarde e pergunte antes de usar". Com o
+/// `ETag` do conteúdo, a pergunta cabe num 304 vazio: o arquivo só desce de
+/// novo quando muda de verdade, e quando muda desce na primeira visita.
+const ASSET_CACHE: &str = "public, no-cache";
+
+/// Responde o asset, ou um 304 quando o navegador já tem esta versão.
+fn static_asset(
+    request: &HeaderMap,
+    content_type: &'static str,
+    body: &'static str,
+    tag: &str,
+) -> Response {
+    let headers = [
+        (header::CONTENT_TYPE, content_type),
+        (header::CACHE_CONTROL, ASSET_CACHE),
+        (header::ETAG, tag),
+    ];
+
+    if has_tag(request, tag) {
+        return (StatusCode::NOT_MODIFIED, headers).into_response();
+    }
+
+    (headers, body).into_response()
+}
+
+/// O `If-None-Match` pode trazer uma LISTA de etiquetas (e cada uma pode vir
+/// marcada como fraca, `W/"…"`), então comparar a string inteira erraria.
+fn has_tag(request: &HeaderMap, tag: &str) -> bool {
+    request
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .map(|candidate| candidate.trim().trim_start_matches("W/"))
+                .any(|candidate| candidate == tag || candidate == "*")
+        })
+}
+
+/// Impressão digital do conteúdo, no formato de `ETag` (entre aspas). Metade do
+/// SHA-256 basta: aqui a etiqueta só precisa mudar quando o arquivo muda, não
+/// resistir a alguém tentando forjar uma colisão.
+fn content_tag(body: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(body.as_bytes());
+    let mut tag = String::with_capacity(34);
+
+    tag.push('"');
+    for byte in &digest[..16] {
+        use std::fmt::Write;
+        let _ = write!(tag, "{byte:02x}");
+    }
+    tag.push('"');
+
+    tag
 }
 
 /// `true` quando a resposta deve ser o fragmento parcial da carteira, não a
@@ -117,11 +205,14 @@ async fn htmx_js() -> impl axum::response::IntoResponse {
 /// exceção é a restauração de histórico (voltar/avançar com o cache local
 /// expirado), que vem com `HX-History-Restore-Request` e espera a página
 /// COMPLETA para reconstruir o estado do zero.
-fn is_partial_request(headers: &HeaderMap) -> bool {
+fn is_htmx_request(headers: &HeaderMap) -> bool {
     headers
         .get("hx-request")
         .is_some_and(|value| value == "true")
-        && !headers.contains_key("hx-history-restore-request")
+}
+
+fn is_partial_request(headers: &HeaderMap) -> bool {
+    is_htmx_request(headers) && !headers.contains_key("hx-history-restore-request")
 }
 
 /// Extrator do sinal acima. Sem JavaScript (ou sem o header), tudo cai no
@@ -133,6 +224,42 @@ impl<S: Send + Sync> FromRequestParts<S> for HxRequest {
 
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Infallible> {
         Ok(Self(is_partial_request(&parts.headers)))
+    }
+}
+
+/// `User` para telas HTML: sem sessão válida, manda para `/login` em vez de
+/// devolver JSON.
+///
+/// O extrator `User` rejeita com `AppError`, que vira `{"error": "..."}` — a
+/// resposta certa para a API, e a errada para quem abriu um link no navegador
+/// com o token expirado. Em navegação clássica devolvemos o redirect HTTP; numa
+/// requisição htmx usamos `HX-Redirect`, para que a tela de login substitua a
+/// página inteira em vez de ser encaixada dentro do fragmento da carteira.
+struct SessionUser(User);
+
+impl FromRequestParts<AppState> for SessionUser {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        User::from_request_parts(parts, state)
+            .await
+            .map(Self)
+            .map_err(|_| unauthenticated_page_response(&parts.headers))
+    }
+}
+
+fn unauthenticated_page_response(headers: &HeaderMap) -> Response {
+    if is_htmx_request(headers) {
+        let mut response = StatusCode::UNAUTHORIZED.into_response();
+        response
+            .headers_mut()
+            .insert("hx-redirect", HeaderValue::from_static("/login"));
+        response
+    } else {
+        Redirect::to("/login").into_response()
     }
 }
 
@@ -234,23 +361,24 @@ async fn authenticate_form(
     form: LoginForm,
 ) -> Result<User, AppError> {
     verify_csrf(jar, &form.csrf_token)?;
+    let username = form.username.trim().to_string();
 
     // Lockout ANTES de conferir a senha: durante o bloqueio nem a senha certa
     // passa, então força bruta não extrai sinal nenhum das tentativas.
-    state.login_throttle.ensure_allowed(&form.username).await?;
+    state.login_throttle.ensure_allowed(&username).await?;
 
-    match UnauthenticatedUser::new(form.username.clone(), form.password)
+    match UnauthenticatedUser::new(username.clone(), form.password)
         .authenticate(repository)
         .await
     {
         Ok(user) => {
-            state.login_throttle.record_success(&form.username).await;
+            state.login_throttle.record_success(&username).await;
             Ok(user)
         }
         // Só falhas de credencial alimentam o contador — sondagem de username
         // e senha errada contam igual; erro de banco não.
         Err(error @ (AppError::InvalidCredentials | AppError::UserDoesNotExist)) => {
-            state.login_throttle.record_failure(&form.username).await;
+            state.login_throttle.record_failure(&username).await;
             Err(error)
         }
         Err(error) => Err(error),
@@ -291,7 +419,7 @@ async fn register(
 /// Exporta o extrato completo do usuário autenticado como download CSV.
 #[instrument(skip_all)]
 async fn transactions_csv(
-    user: User,
+    SessionUser(user): SessionUser,
     repository: Repository,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
     let transactions = repository.list_all_transactions(user.id()).await?;
@@ -404,7 +532,7 @@ async fn index(maybe_user: Option<User>) -> Redirect {
     }
 }
 
-/// Tudo o que o miolo da carteira (o `<div id="wallet">`) precisa para se
+/// Tudo o que o miolo da carteira (o `<main id="wallet">`) precisa para se
 /// desenhar. É compartilhado pelos DOIS templates: a página completa
 /// (`assets.html`, que inclui o fragmento) e o fragmento sozinho
 /// (`wallet.html`), devolvido nas requisições parciais do htmx.
@@ -437,6 +565,10 @@ impl WalletData {
 
     fn is_sell(&self) -> bool {
         matches!(self.action, WalletAction::Sell)
+    }
+
+    fn deposit_is_primary(&self) -> bool {
+        matches!(self.action, WalletAction::None | WalletAction::Deposit)
     }
 
     fn new(
@@ -477,6 +609,249 @@ struct WalletFragment {
     wallet: WalletData,
 }
 
+/// Dados da tela de mercado.
+///
+/// As moedas chegam por REFERÊNCIA ao snapshot que o job mantém: a
+/// renderização não copia a lista (nem as séries temporais dentro dela), só
+/// empresta enquanto desenha. O `Arc` do snapshot fica vivo no handler até o
+/// HTML estar pronto.
+struct MarketData<'a> {
+    /// O que a lista lateral mostra: todas as moedas ou o resultado da busca.
+    coins: Vec<&'a Coin>,
+    /// A moeda em foco no painel. `None` só antes da primeira rodada do job.
+    selected: Option<&'a Coin>,
+    /// Série projetada da moeda em foco. `None` quando a fonte não mandou
+    /// pontos suficientes para desenhar uma linha.
+    chart: Option<PriceChart>,
+    range: Range,
+    /// Termo da busca, devolvido ao campo para a tela não esquecer o filtro.
+    query: String,
+    /// URL do estado atual (moeda + período + busca): é o que o poller de 60 s
+    /// repete para atualizar os números sem mexer no que o usuário escolheu.
+    state_url: String,
+    day_url: String,
+    week_url: String,
+    updated_at: Option<time::OffsetDateTime>,
+    refresh_failed: bool,
+    t: &'static Strings,
+}
+
+impl MarketData<'_> {
+    /// URL que seleciona esta moeda preservando período e busca. É o `href`
+    /// real do link — sem JavaScript, clicar na lista continua trocando a
+    /// moeda do painel.
+    fn coin_url(&self, coin: &Coin) -> String {
+        market_url(&coin.id, self.range, &self.query)
+    }
+
+    fn is_selected(&self, coin: &Coin) -> bool {
+        self.selected.is_some_and(|selected| selected.id == coin.id)
+    }
+
+    fn is_day(&self) -> bool {
+        self.range.is_day()
+    }
+
+    fn is_week(&self) -> bool {
+        self.range.is_week()
+    }
+
+    /// Agregado em BRL na forma compacta das mesas de operação.
+    fn compact_brl(&self, value: &Decimal) -> String {
+        compact_brl(value, self.t)
+    }
+
+    /// Mesma escala, sem moeda — a oferta em circulação é contada em unidades
+    /// da própria cripto.
+    fn compact_units(&self, value: &Decimal) -> String {
+        compact_units(value, self.t)
+    }
+}
+
+#[derive(Template)]
+#[template(path = "market.html")]
+struct MarketPage<'a> {
+    user: User,
+    market: MarketData<'a>,
+    t: &'static Strings,
+}
+
+#[derive(Template)]
+#[template(path = "market_dashboard.html")]
+struct MarketFragment<'a> {
+    market: MarketData<'a>,
+}
+
+#[derive(Deserialize)]
+struct MarketQuery {
+    /// Identificador da CoinGecko da moeda em foco.
+    coin: Option<String>,
+    /// Janela do gráfico (`24h` ou `7d`).
+    range: Option<String>,
+    /// Busca da lista lateral.
+    q: Option<String>,
+}
+
+/// Tela de mercado: painel da moeda selecionada e a lista lateral com todas as
+/// variações.
+///
+/// Só lê o snapshot que o job de segundo plano mantém — nunca chama a API de
+/// fora no caminho da requisição. Assim a página responde no mesmo tempo com
+/// um usuário ou com mil, o limite da fonte gratuita não depende de quantas
+/// pessoas abriram a tela, e trocar de moeda ou de período não custa uma
+/// chamada externa: os dados dos 100 ativos já estão em memória.
+#[instrument(skip_all)]
+async fn market_page(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    hx: HxRequest,
+    locale: Locale,
+    Query(query): Query<MarketQuery>,
+) -> Result<Html<String>, AppError> {
+    let snapshot = state.market.snapshot().await;
+    let range = query
+        .range
+        .as_deref()
+        .and_then(Range::from_tag)
+        .unwrap_or_default();
+    let needle = search_needle(query.q.as_deref());
+
+    let selected = snapshot.select(query.coin.as_deref());
+    let coins: Vec<&Coin> = snapshot
+        .coins
+        .iter()
+        .filter(|coin| needle.is_empty() || coin.matches(&needle))
+        .collect();
+
+    let selected_id = selected.map(|coin| coin.id.as_str()).unwrap_or_default();
+    let market = MarketData {
+        chart: selected.and_then(|coin| coin.chart(range, snapshot.updated_at)),
+        coins,
+        selected,
+        range,
+        state_url: market_url(selected_id, range, &needle),
+        day_url: market_url(selected_id, Range::Day, &needle),
+        week_url: market_url(selected_id, Range::Week, &needle),
+        query: needle,
+        updated_at: snapshot.updated_at,
+        refresh_failed: snapshot.refresh_failed,
+        t: locale.strings(),
+    };
+
+    // Com htmx volta só o painel (a própria página repõe os pedaços que
+    // mudaram); sem htmx, a página inteira — o fluxo clássico continua
+    // funcionando, inclusive a seleção de moeda, que é um link comum.
+    let html = if hx.0 {
+        MarketFragment { market }.render()?
+    } else {
+        MarketPage {
+            user,
+            market,
+            t: locale.strings(),
+        }
+        .render()?
+    };
+
+    Ok(Html(html))
+}
+
+/// Termo de busca normalizado: minúsculo, sem espaços nas pontas e limitado —
+/// o campo é livre, o custo da varredura não pode ser.
+fn search_needle(raw: Option<&str>) -> String {
+    const MAX_CHARS: usize = 32;
+
+    raw.unwrap_or_default()
+        .trim()
+        .to_lowercase()
+        .chars()
+        .take(MAX_CHARS)
+        .collect()
+}
+
+/// Monta a URL da tela preservando o estado que o usuário construiu: moeda em
+/// foco, período do gráfico e busca. É o que faz um link comum (sem htmx) e o
+/// botão voltar do navegador levarem à MESMA tela.
+fn market_url(coin: &str, range: Range, query: &str) -> String {
+    let mut url = format!("/market?coin={}&range={}", query_escape(coin), range.tag());
+    if !query.is_empty() {
+        url.push_str("&q=");
+        url.push_str(&query_escape(query));
+    }
+    url
+}
+
+/// Percent-encoding do que entra numa query string.
+///
+/// O askama já escapa HTML, o que impede o valor de escapar do atributo — mas
+/// não impede um `&` de virar separador e partir a URL em dois parâmetros. O
+/// termo de busca é texto livre do usuário; ele passa por aqui antes de virar
+/// link.
+fn query_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+
+    for byte in value.bytes() {
+        match byte {
+            // Os "unreserved" da RFC 3986 seguem literais; todo o resto vai
+            // como %XX, inclusive espaço, acento e separadores de query.
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                escaped.push(byte as char);
+            }
+            _ => escaped.push_str(&format!("%{byte:02X}")),
+        }
+    }
+
+    escaped
+}
+
+/// Agregado em BRL na forma compacta que mesa de operação usa: "R$ 6,51 tri"
+/// em vez de catorze dígitos.
+///
+/// Vale só para número informativo (capitalização, volume, oferta). Nada da
+/// carteira passa por aqui: saldo, posição e resultado saem com todas as casas
+/// que o `Decimal` guarda.
+fn compact_brl(value: &Decimal, t: &Strings) -> String {
+    if value.is_zero() {
+        return NOT_PUBLISHED.to_string();
+    }
+    let (digits, unit) = compact_parts(value, t);
+    format!("{}R$ {digits}{unit}", filters::ptbr_sign(value))
+}
+
+fn compact_units(value: &Decimal, t: &Strings) -> String {
+    if value.is_zero() {
+        return NOT_PUBLISHED.to_string();
+    }
+    let (digits, unit) = compact_parts(value, t);
+    format!("{}{digits}{unit}", filters::ptbr_sign(value))
+}
+
+/// Zero, nestes agregados, é "a fonte não publicou" (ver `market.rs`) — e um
+/// traço diz isso; "R$ 0,00" mentiria, parecendo medição.
+const NOT_PUBLISHED: &str = "—";
+
+fn compact_parts(value: &Decimal, t: &Strings) -> (String, String) {
+    let scales = [
+        (12u32, t.unit_trillion),
+        (9, t.unit_billion),
+        (6, t.unit_million),
+        (3, t.unit_thousand),
+    ];
+
+    for (exponent, unit) in scales {
+        let factor = Decimal::from(10u64.pow(exponent));
+        if value.abs() >= factor {
+            // Arredonda ANTES de formatar: a formatação com precisão trunca, e
+            // um volume de 98,765 mi apareceria como 98,76 mi.
+            return (
+                filters::ptbr_digits(&(value / factor).round_dp(2), 2, false),
+                format!(" {unit}"),
+            );
+        }
+    }
+
+    (filters::ptbr_digits(value, 2, false), String::new())
+}
+
 enum WalletAction {
     None,
     Deposit,
@@ -492,7 +867,7 @@ struct PageQuery {
 #[instrument(skip_all)]
 async fn assets_page(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -515,7 +890,7 @@ async fn assets_page(
 #[instrument(skip_all)]
 async fn deposit_page(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -538,7 +913,7 @@ async fn deposit_page(
 #[instrument(skip_all)]
 async fn buy_page(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -561,7 +936,7 @@ async fn buy_page(
 #[instrument(skip_all)]
 async fn sell_page(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -693,7 +1068,7 @@ async fn wallet_outcome(
 #[instrument(skip_all)]
 async fn deposit(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -733,7 +1108,7 @@ struct TradeAssetForm {
 #[instrument(skip_all)]
 async fn buy_asset(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -766,7 +1141,7 @@ async fn buy_asset(
 #[instrument(skip_all)]
 async fn sell_asset(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -808,7 +1183,7 @@ struct SyncQuotesForm {
 #[instrument(skip_all)]
 async fn sync_quotes(
     State(state): State<AppState>,
-    user: User,
+    SessionUser(user): SessionUser,
     portfolio: PortfolioService,
     jar: CookieJar,
     hx: HxRequest,
@@ -817,7 +1192,9 @@ async fn sync_quotes(
 ) -> Result<Response, AppError> {
     let outcome = async {
         verify_csrf(&jar, &form.csrf_token)?;
-        sync_quotes_round(&Repository::from_state(&state))
+        state
+            .quote_sync
+            .run(&Repository::from_state(&state), true)
             .await
             .map(|_| ())
     }
@@ -846,6 +1223,293 @@ mod tests {
     use rust_decimal_macros::dec;
     use time::macros::datetime;
 
+    /// Snapshot de mercado com uma moeda em alta, uma em baixa e uma parada.
+    fn test_coins() -> Vec<Coin> {
+        vec![
+            Coin {
+                id: "bitcoin".into(),
+                rank: 1,
+                symbol: "BTC".into(),
+                name: "Bitcoin".into(),
+                price: dec!(325611.00),
+                change_24h: dec!(2.50),
+                change_1h: dec!(0.40),
+                change_7d: dec!(-1.20),
+                market_cap: dec!(6512345678901),
+                volume_24h: dec!(98765432.10),
+                high_24h: dec!(330000),
+                low_24h: dec!(320000),
+                ath: dec!(400000),
+                ath_change_pct: dec!(-18.60),
+                circulating_supply: dec!(19800000),
+                // Série horária de sete dias, como a fonte entrega.
+                series: (0..168)
+                    .map(|hour| 300_000.0 + hour as f64 * 100.0)
+                    .collect(),
+            },
+            Coin {
+                id: "ethereum".into(),
+                rank: 2,
+                symbol: "ETH".into(),
+                name: "Ethereum".into(),
+                price: dec!(9636.59),
+                change_24h: dec!(-3.00),
+                ..Coin::default()
+            },
+            Coin {
+                id: "tether".into(),
+                rank: 3,
+                symbol: "USDT".into(),
+                name: "Tether".into(),
+                price: dec!(5.13),
+                change_24h: dec!(0),
+                ..Coin::default()
+            },
+            Coin {
+                id: "tiny-coin".into(),
+                rank: 4,
+                symbol: "TINY".into(),
+                name: "Tiny Coin".into(),
+                price: dec!(0.00004125),
+                change_24h: dec!(1),
+                ..Coin::default()
+            },
+        ]
+    }
+
+    /// Monta o fragmento como o handler monta: selecionando pelo id, filtrando
+    /// pela busca e derivando as URLs que preservam o estado da tela.
+    fn test_market<'a>(coins: &'a [Coin], coin: Option<&str>, query: &str) -> MarketData<'a> {
+        let selected = coin
+            .and_then(|id| coins.iter().find(|coin| coin.id == id))
+            .or_else(|| coins.first());
+        let selected_id = selected.map(|coin| coin.id.as_str()).unwrap_or_default();
+
+        MarketData {
+            coins: coins
+                .iter()
+                .filter(|coin| query.is_empty() || coin.matches(query))
+                .collect(),
+            selected,
+            chart: selected
+                .and_then(|coin| coin.chart(Range::Week, Some(datetime!(2026-07-28 01:07 UTC)))),
+            range: Range::Week,
+            state_url: market_url(selected_id, Range::Week, query),
+            day_url: market_url(selected_id, Range::Day, query),
+            week_url: market_url(selected_id, Range::Week, query),
+            query: query.to_string(),
+            updated_at: Some(datetime!(2026-07-28 01:07 UTC)),
+            refresh_failed: false,
+            t: Locale::PtBr.strings(),
+        }
+    }
+
+    /// O invariante de acessibilidade do painel: verde e vermelho medem ΔE
+    /// ~4,6 sob deuteranopia, então **nenhuma variação pode ser comunicada só
+    /// por cor**. Toda variação tem de trazer seta E sinal — este teste é o
+    /// que trava isso contra uma refatoração distraída do template.
+    #[test]
+    fn market_dashboard_marks_direction_with_arrow_and_sign_not_only_colour() {
+        let coins = test_coins();
+        let html = MarketFragment {
+            market: test_market(&coins, None, ""),
+        }
+        .render()
+        .expect("render");
+
+        // Alta: seta para cima e sinal de mais, além da classe de cor.
+        assert!(html.contains("▲"), "falta a seta de alta");
+        assert!(html.contains("+2,50%"), "falta o sinal e o valor da alta");
+        assert!(html.contains("text-up"), "falta a cor semântica da alta");
+        // Baixa: seta para baixo e sinal de menos.
+        assert!(html.contains("▼"), "falta a seta de baixa");
+        assert!(html.contains("−3,00%"), "falta o sinal e o valor da baixa");
+        assert!(html.contains("text-down"), "falta a cor semântica da baixa");
+        // Parada: sem seta, sem sinal.
+        assert!(html.contains("0,00%"), "falta a variação nula");
+
+        // O filtro já traz o símbolo da moeda; ele já duplicou ("R$ R$").
+        assert!(html.contains("R$ 325.611,00"), "preço em pt-BR");
+        assert!(!html.contains("R$ R$"), "símbolo da moeda repetido");
+        assert!(
+            html.contains("R$ 0,00004125"),
+            "cotação pequena não pode virar R$ 0,00"
+        );
+
+        let css = include_str!("../../static/app.css");
+        assert!(
+            css.contains(".text-up{") && css.contains(".text-down{"),
+            "as classes semânticas renderizadas precisam existir no CSS compilado"
+        );
+    }
+
+    /// O painel abre na moeda de maior capitalização e mostra os indicadores
+    /// da carteira digital: variações, capitalização, volume, faixa do dia e a
+    /// série temporal.
+    #[test]
+    fn market_dashboard_shows_the_selected_coin_with_its_time_series() {
+        let coins = test_coins();
+        let html = MarketFragment {
+            market: test_market(&coins, None, ""),
+        }
+        .render()
+        .expect("render");
+
+        assert!(html.contains("Bitcoin") && html.contains("BTC/BRL"));
+        // Agregados grandes saem compactos, com o sufixo do idioma.
+        assert!(html.contains("R$ 6,51 tri"), "capitalização compacta");
+        assert!(html.contains("R$ 98,77 mi"), "volume compacto");
+        assert!(html.contains("19,80 mi"), "oferta em circulação");
+        // Faixa de negociação: marcador dentro do medidor, mínima e máxima.
+        assert!(html.contains("R$ 320.000,00") && html.contains("R$ 330.000,00"));
+        // 325.611 em [320.000, 330.000]: 56,11% da faixa, já em coordenada.
+        assert!(html.contains(r#"x="335.4""#), "marcador da faixa do dia");
+        // Série temporal: linha, eixo do tempo e a janela ativa marcada.
+        assert!(html.contains("<path d=\"M10.00"), "linha do gráfico");
+        assert!(html.contains("28/07"), "rótulo do eixo do tempo");
+        assert!(
+            html.contains(r#"href="/market?coin=bitcoin&#38;range=24h""#),
+            "link da janela de 24 h"
+        );
+
+        // O painel se repõe sozinho preservando a moeda em foco, e as duas
+        // regiões vivas da tela existem para o htmx trocar.
+        assert!(html.contains(r#"hx-get="/market?coin=bitcoin&#38;range=7d""#));
+        assert!(html.contains(r#"hx-trigger="every 60s""#));
+        assert!(html.contains(r#"id="market-detail""#));
+        assert!(html.contains(r#"id="market-list""#));
+        assert!(html.contains(r#"id="market-state""#));
+        assert!(html.contains(r##"hx-select-oob="#market-list,#market-state""##));
+    }
+
+    /// Selecionar uma moeda é um link comum: o estado inteiro da tela (moeda,
+    /// período e busca) viaja na URL, então funciona sem JavaScript nenhum.
+    #[test]
+    fn market_dashboard_selects_by_id_and_keeps_the_state_in_every_link() {
+        let coins = test_coins();
+        let html = MarketFragment {
+            market: test_market(&coins, Some("ethereum"), ""),
+        }
+        .render()
+        .expect("render");
+
+        assert!(html.contains("Ethereum"));
+        assert!(
+            html.contains(r#"aria-current="true" class="flex items-center"#),
+            "a linha da moeda em foco precisa se anunciar como atual"
+        );
+        assert!(html.contains(r#"href="/market?coin=tether&#38;range=7d""#));
+
+        // Id desconhecido não deixa a tela vazia: cai na primeira do ranking.
+        let fallback = MarketFragment {
+            market: test_market(&coins, Some("nao-existe"), ""),
+        }
+        .render()
+        .expect("render");
+        assert!(fallback.contains("Bitcoin"));
+    }
+
+    #[test]
+    fn market_search_filters_the_side_list_without_losing_the_selection() {
+        let coins = test_coins();
+        let html = MarketFragment {
+            market: test_market(&coins, Some("bitcoin"), "eth"),
+        }
+        .render()
+        .expect("render");
+
+        assert!(html.contains("Ethereum"));
+        assert!(!html.contains("Tiny Coin"), "a busca filtra a lista");
+        // O painel continua na moeda escolhida, e o termo volta para o campo.
+        assert!(html.contains(r#"value="eth""#));
+        assert!(html.contains("R$ 325.611,00"), "painel intacto");
+        // O formulário de busca dispara para o caminho NU: quem manda moeda,
+        // período e termo são os campos dele. Uma query aqui repetiria os
+        // parâmetros na URL e o extrator recusaria a requisição.
+        assert!(html.contains(r#"hx-get="/market" hx-trigger="submit"#));
+        // Todo link carrega a busca junto, para o filtro sobreviver ao clique.
+        assert!(html.contains(r#"href="/market?coin=ethereum&#38;range=7d&#38;q=eth""#));
+
+        let vazio = MarketFragment {
+            market: test_market(&coins, Some("bitcoin"), "zzz"),
+        }
+        .render()
+        .expect("render");
+        assert!(vazio.contains("nenhuma moeda encontrada"));
+    }
+
+    #[test]
+    fn market_dashboard_shows_a_status_message_before_the_first_round() {
+        let empty: Vec<Coin> = Vec::new();
+        let html = MarketFragment {
+            market: test_market(&empty, None, ""),
+        }
+        .render()
+        .expect("render");
+
+        assert!(
+            html.contains(r#"role="status""#),
+            "leitor de tela precisa saber"
+        );
+        assert!(html.contains("buscando as cotações"));
+        assert!(!html.contains("id=\"market-list\""), "sem dados, sem lista");
+        // Enquanto não há painel, a tela inteira se reconstrói na próxima
+        // rodada — as regiões internas ainda não existem para trocar.
+        assert!(html.contains(r##"hx-select="#market""##));
+
+        let mut unavailable = test_market(&empty, None, "");
+        unavailable.refresh_failed = true;
+        let html = MarketFragment {
+            market: unavailable,
+        }
+        .render()
+        .expect("render");
+        assert!(html.contains("mercado indisponível"));
+        assert!(!html.contains("buscando as cotações"));
+    }
+
+    #[test]
+    fn compact_scale_keeps_big_aggregates_readable() {
+        let pt = Locale::PtBr.strings();
+
+        assert_eq!(compact_brl(&dec!(6512345678901), pt), "R$ 6,51 tri");
+        assert_eq!(compact_brl(&dec!(1500000000), pt), "R$ 1,50 bi");
+        assert_eq!(compact_brl(&dec!(98765432.10), pt), "R$ 98,77 mi");
+        assert_eq!(compact_brl(&dec!(1234.5), pt), "R$ 1,23 mil");
+        assert_eq!(compact_brl(&dec!(999.99), pt), "R$ 999,99");
+        assert_eq!(compact_units(&dec!(19800000), pt), "19,80 mi");
+        assert_eq!(compact_brl(&dec!(-2500000), pt), "- R$ 2,50 mi");
+        // Zero, nestes campos, é "não publicado" — e um traço diz isso melhor
+        // do que um "R$ 0,00" que parece um dado real.
+        assert_eq!(compact_brl(&Decimal::ZERO, pt), "—");
+
+        // A abreviação é palavra, e palavra se traduz; o número segue a
+        // convenção do dado (BRL), como o resto da interface.
+        assert_eq!(
+            compact_brl(&dec!(1500000000), Locale::En.strings()),
+            "R$ 1,50 B"
+        );
+    }
+
+    #[test]
+    fn market_urls_percent_encode_free_text() {
+        assert_eq!(
+            market_url("bitcoin", Range::Week, ""),
+            "/market?coin=bitcoin&range=7d"
+        );
+        // `&`, `=` e espaço não podem partir a query em parâmetros novos.
+        assert_eq!(
+            market_url("bitcoin", Range::Day, "a&b=c d"),
+            "/market?coin=bitcoin&range=24h&q=a%26b%3Dc%20d"
+        );
+        assert_eq!(query_escape("moeda-é_1.0~"), "moeda-%C3%A9_1.0~");
+
+        // O termo chega normalizado (minúsculo, aparado e limitado).
+        assert_eq!(search_needle(Some("  BTC  ")), "btc");
+        assert_eq!(search_needle(None), "");
+        assert_eq!(search_needle(Some(&"x".repeat(100))).len(), 32);
+    }
+
     #[test]
     fn htmx_marks_partial_requests_but_history_restore_wants_the_full_page() {
         let mut headers = HeaderMap::new();
@@ -858,6 +1522,22 @@ mod tests {
         // mas precisa da página inteira para reconstruir o DOM.
         headers.insert("hx-history-restore-request", "true".parse().unwrap());
         assert!(!is_partial_request(&headers), "restauração de histórico");
+    }
+
+    #[test]
+    fn unauthenticated_pages_redirect_the_whole_browser_for_classic_and_htmx_requests() {
+        let classic = unauthenticated_page_response(&HeaderMap::new());
+        assert_eq!(classic.status(), StatusCode::SEE_OTHER);
+        assert_eq!(classic.headers().get(header::LOCATION).unwrap(), "/login");
+        assert!(!classic.headers().contains_key("hx-redirect"));
+
+        let mut htmx_headers = HeaderMap::new();
+        htmx_headers.insert("hx-request", HeaderValue::from_static("true"));
+        let htmx = unauthenticated_page_response(&htmx_headers);
+
+        assert_eq!(htmx.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(htmx.headers().get("hx-redirect").unwrap(), "/login");
+        assert!(!htmx.headers().contains_key(header::LOCATION));
     }
 
     #[test]
@@ -894,6 +1574,52 @@ mod tests {
         }
     }
 
+    /// O campo de depósito carrega `data-money-input` (o gancho da máscara em
+    /// `money-input.js`) e continua um `<input type="number">` de verdade no
+    /// HTML puro — a máscara é aditiva via JS, nunca uma reescrita do
+    /// formulário que o servidor manda.
+    #[test]
+    fn deposit_amount_field_is_a_plain_number_input_hooked_for_the_mask() {
+        let mut wallet = test_wallet(Locale::PtBr);
+        wallet.action = WalletAction::Deposit;
+        let fragment = WalletFragment { wallet }.render().expect("render");
+
+        assert!(fragment.contains(r#"name="amount" type="number""#));
+        assert!(fragment.contains("data-money-input"));
+        assert!(fragment.contains(r#"min="0.01""#), "guarda nativa continua");
+        assert!(fragment.contains("required"));
+    }
+
+    /// `money-input.js` depende de `window.htmx` já carregado (usa
+    /// `htmx.onLoad` para reanexar a máscara depois de cada troca de
+    /// fragmento) — por isso tem de vir DEPOIS do script do htmx no
+    /// documento, e os dois com `defer` (que preserva a ordem do documento).
+    #[test]
+    fn money_input_script_loads_after_htmx_with_defer() {
+        let full = AssetsPage {
+            user: User::new(1, "breno".to_string(), "user".to_string()),
+            wallet: test_wallet(Locale::PtBr),
+            t: Locale::PtBr.strings(),
+        }
+        .render()
+        .expect("render");
+
+        let htmx_at = full.find("/static/htmx.js").expect("htmx.js referenciado");
+        let mask_at = full
+            .find("/static/money-input.js")
+            .expect("money-input.js referenciado");
+        assert!(
+            htmx_at < mask_at,
+            "money-input.js precisa vir depois do htmx"
+        );
+        for script in ["/static/htmx.js", "/static/money-input.js"] {
+            let tag_start = full.find(script).expect("script presente");
+            let tag = &full[full[..tag_start].rfind("<script").unwrap()..];
+            let tag_end = tag.find('>').unwrap();
+            assert!(tag[..tag_end].contains("defer"), "{script} sem defer");
+        }
+    }
+
     #[test]
     fn the_wallet_fragment_is_partial_html_embedded_by_the_full_page() {
         let fragment = WalletFragment {
@@ -904,7 +1630,7 @@ mod tests {
 
         // O fragmento é exatamente o alvo do swap (`outerHTML` de #wallet),
         // com o flash inline — e nada de esqueleto de página em volta.
-        assert!(fragment.starts_with("<div id=\"wallet\">"));
+        assert!(fragment.starts_with("<main id=\"wallet\">"));
         assert!(!fragment.contains("<!DOCTYPE"));
         assert!(fragment.contains("depósito realizado."));
 
@@ -919,7 +1645,7 @@ mod tests {
         // A página completa embute o MESMO fragmento (id único do swap) dentro
         // do esqueleto, com o htmx carregado do próprio binário.
         assert!(full.contains("<!DOCTYPE html>"));
-        assert!(full.contains("<div id=\"wallet\">"));
+        assert!(full.contains("<main id=\"wallet\">"));
         assert!(full.contains("/static/htmx.js"));
         assert_eq!(full.matches("id=\"wallet\"").count(), 1);
     }
@@ -948,7 +1674,18 @@ mod tests {
         .render()
         .expect("login renders");
 
-        for (name, html) in [("assets", &full), ("login", &login)] {
+        // O painel de mercado é a tela mais gráfica do produto (medidor,
+        // série temporal, eixo) — e nada disso pode virar estilo inline.
+        let coins = test_coins();
+        let market = MarketPage {
+            user: User::new(1, "breno".to_string(), "user".to_string()),
+            market: test_market(&coins, None, ""),
+            t: Locale::PtBr.strings(),
+        }
+        .render()
+        .expect("market renders");
+
+        for (name, html) in [("assets", &full), ("login", &login), ("market", &market)] {
             assert!(!html.contains("<style"), "{name}: <style> inline");
             // Todo `<script>` da página tem de ser externo (`src=`).
             for fragment in html.split("<script").skip(1) {
@@ -957,6 +1694,62 @@ mod tests {
             }
             assert!(html.contains("/static/app.css"), "{name}: css externo");
         }
+    }
+
+    /// O CSS e os scripts moram numa URL fixa e mudam a cada build. Se o
+    /// navegador puder usar a cópia guardada sem perguntar, um rebuild deixa a
+    /// tela com o HTML novo e o estilo velho — o layout de mercado empilhado
+    /// que motivou esta política. A etiqueta é o que faz a pergunta caber num
+    /// 304.
+    #[tokio::test]
+    async fn static_assets_revalidate_by_content_and_answer_304_when_unchanged() {
+        let css = app_css(HeaderMap::new()).await;
+        assert_eq!(css.status(), StatusCode::OK);
+
+        let tag = css
+            .headers()
+            .get(header::ETAG)
+            .expect("etag")
+            .to_str()
+            .expect("ascii")
+            .to_string();
+        assert!(tag.starts_with('"') && tag.ends_with('"'), "formato: {tag}");
+        assert_eq!(
+            css.headers().get(header::CACHE_CONTROL).unwrap(),
+            "public, no-cache",
+            "cache sem revalidação serviria estilo de outro binário"
+        );
+
+        // Mesma etiqueta de volta: o corpo não desce outra vez.
+        let mut headers = HeaderMap::new();
+        headers.insert(header::IF_NONE_MATCH, tag.parse().unwrap());
+        assert_eq!(
+            app_css(headers.clone()).await.status(),
+            StatusCode::NOT_MODIFIED
+        );
+
+        // Etiqueta de outra versão (e a marca de "fraca", que o navegador pode
+        // acrescentar) não podem confundir a comparação.
+        let mut stale = HeaderMap::new();
+        stale.insert(header::IF_NONE_MATCH, "\"deadbeef\"".parse().unwrap());
+        assert_eq!(app_css(stale).await.status(), StatusCode::OK);
+
+        let mut weak = HeaderMap::new();
+        weak.insert(
+            header::IF_NONE_MATCH,
+            format!("\"outra\", W/{tag}").parse().unwrap(),
+        );
+        assert_eq!(app_css(weak).await.status(), StatusCode::NOT_MODIFIED);
+
+        // Cada asset tem a própria etiqueta: um rebuild que só mexe no CSS não
+        // pode invalidar o htmx, nem o contrário.
+        let js = htmx_js(HeaderMap::new()).await;
+        assert_ne!(js.headers().get(header::ETAG).unwrap(), tag.as_str());
+        assert_eq!(
+            money_input_js(headers).await.status(),
+            StatusCode::OK,
+            "a etiqueta do CSS não vale para outro arquivo"
+        );
     }
 
     #[test]
@@ -1057,10 +1850,43 @@ pub mod filters {
 
     #[askama::filter_fn]
     pub fn money(value: &Decimal, _: &dyn Values) -> askama::Result<String> {
-        let raw = format!("{:.2}", value.abs());
-        let (integer, cents) = raw
-            .split_once('.')
-            .ok_or_else(|| askama::Error::custom("invalid decimal format"))?;
+        Ok(format_brl(value, 2, false))
+    }
+
+    /// Cotação de mercado em BRL. Acima de R$ 1, centavos bastam; abaixo
+    /// disso mantemos até oito casas e removemos zeros finais sem cair no
+    /// enganoso "R$ 0,00" para criptoativos de preço muito baixo.
+    #[askama::filter_fn]
+    pub fn market_price(value: &Decimal, _: &dyn Values) -> askama::Result<String> {
+        if value.abs() >= Decimal::ONE {
+            Ok(format_brl(value, 2, false))
+        } else {
+            Ok(format_brl(value, 8, true))
+        }
+    }
+
+    fn format_brl(value: &Decimal, decimal_places: usize, trim_fraction: bool) -> String {
+        format!(
+            "{}R$ {}",
+            ptbr_sign(value),
+            ptbr_digits(value, decimal_places, trim_fraction)
+        )
+    }
+
+    /// O sinal sai separado dos dígitos porque o símbolo da moeda fica ENTRE
+    /// os dois: "- R$ 1,00", como num extrato.
+    pub(super) fn ptbr_sign(value: &Decimal) -> &'static str {
+        if value.is_sign_negative() { "- " } else { "" }
+    }
+
+    /// Valor absoluto no padrão pt-BR: milhar com ponto, decimal com vírgula.
+    pub(super) fn ptbr_digits(
+        value: &Decimal,
+        decimal_places: usize,
+        trim_fraction: bool,
+    ) -> String {
+        let raw = format!("{:.*}", decimal_places, value.abs());
+        let (integer, fraction) = raw.split_once('.').unwrap_or((raw.as_str(), ""));
 
         let mut grouped = String::new();
         for (index, character) in integer.chars().rev().enumerate() {
@@ -1070,9 +1896,14 @@ pub mod filters {
             grouped.push(character);
         }
         let integer = grouped.chars().rev().collect::<String>();
-        let sign = if value.is_sign_negative() { "- " } else { "" };
+        let mut fraction = fraction.to_string();
+        if trim_fraction {
+            while fraction.len() > 2 && fraction.ends_with('0') {
+                fraction.pop();
+            }
+        }
 
-        Ok(format!("{sign}R$ {integer},{cents}"))
+        format!("{integer},{fraction}")
     }
 
     #[askama::filter_fn]
@@ -1083,6 +1914,16 @@ pub mod filters {
     #[askama::filter_fn]
     pub fn nonnegative(value: &Decimal, _: &dyn Values) -> askama::Result<bool> {
         Ok(*value >= Decimal::ZERO)
+    }
+
+    #[askama::filter_fn]
+    pub fn positive(value: &Decimal, _: &dyn Values) -> askama::Result<bool> {
+        Ok(*value > Decimal::ZERO)
+    }
+
+    #[askama::filter_fn]
+    pub fn negative(value: &Decimal, _: &dyn Values) -> askama::Result<bool> {
+        Ok(*value < Decimal::ZERO)
     }
 
     /// Percentual em valor ABSOLUTO, com vírgula decimal. O sinal fica por

@@ -29,6 +29,10 @@ pub struct Config {
     pub refresh_ttl_days: u64,
     /// Intervalo do job de cotações, em minutos. Zero desliga o job.
     pub quotes_sync_minutes: u64,
+    /// Intervalo do job da tela de mercado, em segundos. Zero desliga o job.
+    /// O padrão acompanha o cache da fonte (~60 s): buscar mais rápido não
+    /// traria número novo, só gastaria requisição do limite gratuito.
+    pub market_sync_seconds: u64,
 }
 
 impl Config {
@@ -51,6 +55,7 @@ impl Config {
             session_ttl_minutes: optional_positive("SESSION_TTL_MINUTES", 10)?,
             refresh_ttl_days: optional_positive("REFRESH_TTL_DAYS", 14)?,
             quotes_sync_minutes: optional_non_negative("QUOTES_SYNC_MINUTES", 10)?,
+            market_sync_seconds: optional_non_negative("MARKET_SYNC_SECONDS", 60)?,
         })
     }
 }

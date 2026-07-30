@@ -86,14 +86,17 @@ pub fn take_flash(jar: CookieJar) -> (CookieJar, Option<Flash>) {
 pub fn business_flash(error: AppError, t: &Strings) -> Result<Flash, AppError> {
     let message = match &error {
         AppError::InvalidAmount => t.flash_invalid_amount,
+        AppError::TradeTooSmall => t.flash_trade_too_small,
         AppError::InsufficientBalance => t.flash_insufficient_balance,
         AppError::InsufficientHoldings => t.flash_insufficient_holdings,
         AppError::AssetDoesNotExist => t.flash_asset_missing,
         AppError::InvalidCredentials | AppError::UserDoesNotExist => t.flash_bad_credentials,
         AppError::UsernameTaken => t.flash_username_taken,
+        AppError::InvalidRegistration => t.flash_invalid_registration,
         AppError::TooManyAttempts => t.flash_too_many_attempts,
         AppError::CsrfMismatch => t.flash_csrf,
         AppError::QuoteUnavailable => t.flash_quotes_unavailable,
+        AppError::QuoteSyncTooSoon => t.flash_quotes_wait,
         _ => return Err(error),
     };
 

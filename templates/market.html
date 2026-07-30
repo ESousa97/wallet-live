@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.title_market }}{% endblock %}
+
+{% block content %}
+<a href="#conteudo" class="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-plane">{{ t.skip_link }}</a>
+
+<div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
+    <header class="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <span aria-hidden="true" class="grid h-9 w-9 place-items-center rounded-xl bg-accent text-lg font-semibold text-plane">w</span>
+            <div>
+                <p class="text-sm font-semibold tracking-tight">wallet</p>
+                <p class="text-xs text-ink-3">{{ t.welcome }} {{ user.username() }}</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-1">
+            <nav aria-label="{{ t.lang_label }}" class="mr-1 flex items-center gap-0.5 rounded-lg border border-hairline p-0.5 text-xs">
+                {% if t.lang == "pt-BR" %}
+                <span aria-current="true" class="rounded-md bg-raised px-2 py-1 font-semibold text-ink">pt</span>
+                {% else %}
+                <a href="/lang/pt-BR?next=/market" class="rounded-md px-2 py-1 text-ink-3 transition hover:text-ink">pt</a>
+                {% endif %}
+                {% if t.lang == "en" %}
+                <span aria-current="true" class="rounded-md bg-raised px-2 py-1 font-semibold text-ink">en</span>
+                {% else %}
+                <a href="/lang/en?next=/market" class="rounded-md px-2 py-1 text-ink-3 transition hover:text-ink">en</a>
+                {% endif %}
+            </nav>
+            <a href="/assets" class="rounded-lg px-3 py-2 text-sm font-medium text-ink-3 transition hover:bg-raised hover:text-ink">{{ t.market_back }}</a>
+            <a href="/logout" class="rounded-lg px-3 py-2 text-sm font-medium text-ink-3 transition hover:bg-raised hover:text-ink">{{ t.nav_logout }}</a>
+        </div>
+    </header>
+
+    <main id="conteudo" tabindex="-1" class="outline-none">
+        <div class="mb-6">
+            <h1 class="text-2xl font-semibold tracking-tight">{{ t.market_heading }}</h1>
+            <p class="mt-1 text-sm text-ink-3">{{ t.market_subtitle }}</p>
+            <p class="mt-1 text-xs text-ink-3">{{ t.market_note }}</p>
+        </div>
+
+        {#
+          O painel traz os próprios `hx-*` e se repõe sozinho. Sem JavaScript,
+          o que fica é o mesmo painel renderizado no servidor — a seleção de
+          moeda e o período continuam funcionando por link comum; a página só
+          deixa de se atualizar sozinha.
+        #}
+        {% include "market_dashboard.html" %}
+    </main>
+</div>
+{% endblock %}

@@ -5,9 +5,10 @@
 {% block content %}
 <main class="flex min-h-screen items-center justify-center px-4 py-10">
     <div class="w-full max-w-sm">
-        <div class="mb-6 flex items-center gap-3">
+        <div class="mb-4 flex flex-wrap items-center gap-3">
             <span aria-hidden="true" class="grid h-10 w-10 place-items-center rounded-xl bg-accent text-xl font-semibold text-plane">w</span>
             <h1 class="text-xl font-semibold tracking-tight">wallet</h1>
+            <span class="ml-auto rounded-full border border-hairline px-2.5 py-1 text-xs text-ink-3">{{ t.auth_badge }}</span>
         </div>
 
         <div class="rounded-2xl border border-hairline bg-surface p-6 sm:p-8">
@@ -40,6 +41,8 @@
                         name="username"
                         type="text"
                         required
+                        minlength="{% if is_register %}3{% else %}1{% endif %}"
+                        maxlength="32"
                         autofocus
                         autocomplete="username"
                         autocapitalize="none"
@@ -55,9 +58,14 @@
                         name="password"
                         type="password"
                         required
+                        minlength="{% if is_register %}8{% else %}1{% endif %}"
+                        maxlength="128"
                         autocomplete="{% if is_register %}new-password{% else %}current-password{% endif %}"
                         class="w-full rounded-xl border border-hairline bg-plane px-4 py-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40"
                     />
+                    {% if is_register %}
+                    <p class="mt-1.5 text-xs text-ink-3">{{ t.password_requirements }}</p>
+                    {% endif %}
                 </div>
 
                 <button
