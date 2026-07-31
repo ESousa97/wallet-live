@@ -245,20 +245,24 @@ são de baixo esforço.
 
 ## Licença
 
-> ⚠️ **Este projeto ainda não tem licença definida.**
->
-> Um repositório público sem licença significa **todos os direitos reservados**: o
-> código não pode ser legalmente usado, modificado ou redistribuído por terceiros.
->
-> A titularidade **foi verificada**: os [Termos de Uso da DIO](https://www.dio.me/terms)
-> declaram que a plataforma *"não clama propriedade"* do conteúdo do usuário, e o que
-> ela reivindica como "Conteúdo" é o próprio material didático — não a implementação do
-> aluno. Os editais Santander/DIO não tratam de propriedade intelectual.
->
-> Falta apenas verificar as licenças das dependências (`cargo license`) e escolher entre
-> **MIT**, **Apache-2.0** ou o duplo `MIT OR Apache-2.0`, convenção do ecossistema Rust.
->
-> Análise completa: [licensing.md](docs/decisions/licensing.md).
+Este repositório ainda não possui licença *open source* definida.
+
+O projeto contém extensa contribuição autoral própria, mas foi iniciado a partir de
+estrutura e componentes do projeto didático
+[`rust-fullstack-carteira-investimentos`](https://github.com/digitalinnovationone/rust-fullstack-carteira-investimentos),
+publicado pela DIO sem uma licença *open source* expressa identificada.
+
+Por essa razão, ainda não está demonstrado o direito de sublicenciar o repositório
+inteiro sob MIT, Apache-2.0 ou outra licença.
+
+Enquanto a proveniência e a autorização do código-base não forem resolvidas,
+aplicam-se os direitos autorais padrão. A publicação pública permite a visualização
+do código e o uso das funcionalidades previstas pelo GitHub, mas não concede
+autorização geral para copiar, modificar, redistribuir ou utilizar comercialmente o
+projeto.
+
+Também permanece pendente a auditoria das licenças das dependências Rust. Consulte
+[licensing.md](docs/decisions/licensing.md) para a análise completa.
 
 ## Notas de ambiente (Windows)
 

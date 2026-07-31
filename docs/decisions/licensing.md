@@ -1,335 +1,209 @@
 # Análise de licenciamento
 
-## Objetivo
+## 1. Objetivo e aviso jurídico
 
-Analisar a situação de licenciamento do projeto, comparar as licenças aplicáveis e
-apresentar uma recomendação técnica fundamentada — sem tomar a decisão, que depende de
-fatos que só o titular do código pode confirmar.
+Este documento registra, de forma técnica e auditável, a proveniência conhecida do
+projeto, o estado atual de licenciamento e as pendências que precisam ser resolvidas
+antes da adoção de uma licença *open source*.
 
-## Escopo
+> Esta é uma análise documental, não um parecer jurídico. As conclusões se limitam
+> às evidências identificadas no repositório e aos documentos mencionados. Questões
+> de titularidade, autorização, sublicenciamento ou uso comercial relevante devem ser
+> avaliadas por profissional habilitado quando necessário.
 
-Coberto: situação atual, análise de titularidade, compatibilidade com dependências,
-matriz comparativa e recomendação condicionada. Não coberto: inventário de
-dependências (ver
-[../development/dependency-management.md](../development/dependency-management.md)).
+## 2. Estado atual
 
-> ## ⚠️ Este documento é análise técnica, não orientação jurídica
->
-> As considerações abaixo baseiam-se no que é verificável no repositório. Elas **não
-> constituem aconselhamento jurídico** e não substituem a consulta a um profissional
-> habilitado quando houver dúvida sobre titularidade, obrigação contratual ou uso
-> comercial.
+- O repositório é público no GitHub.
+- Não há arquivo `LICENSE`, `LICENSE.md` ou `COPYING`.
+- O `Cargo.toml` não possui campo `license`.
+- Na ausência de licença expressa, aplicam-se os direitos autorais padrão.
 
----
+Portanto, este repositório não deve ser apresentado como *open source*. Sua
+publicação permite visualização e as funcionalidades próprias oferecidas pelo GitHub,
+mas não concede ao público autorização geral para copiar, modificar, redistribuir,
+sublicenciar ou explorar comercialmente o código.
 
-## 1. Situação atual: **não há licença**
+## 3. Proveniência do código-base
 
-**O repositório não contém arquivo `LICENSE`, `LICENSE.md` ou `COPYING`.** O
-`Cargo.toml` também não declara o campo `license`.
+O projeto teve origem no desafio didático da DIO associado ao repositório:
 
-### O que isso significa, concretamente
+<https://github.com/digitalinnovationone/rust-fullstack-carteira-investimentos>
 
-Um repositório **público** sem licença não é "de domínio público" nem "livre para
-usar". Sob as convenções de direito autoral aplicáveis à maioria das jurisdições, a
-ausência de licença significa **todos os direitos reservados**:
+## 4. Correspondências verificadas no histórico inicial
 
-| Ação de terceiro | Permitida hoje? |
-| --- | --- |
-| Ler o código no GitHub | Sim |
-| Fazer *fork* pela interface do GitHub | Sim — permitido pelos Termos de Serviço do GitHub |
-| Clonar localmente | Sim, na prática |
-| **Usar o código em outro projeto** | **Não** |
-| **Modificar e redistribuir** | **Não** |
-| **Usar comercialmente** | **Não** |
-| **Contribuir com pull request** | Juridicamente ambíguo — não há termo que defina como a contribuição é licenciada |
+O histórico inicial do `wallet-live` contém correspondências identificáveis com esse
+projeto-base, entre elas:
 
-> **A consequência prática é o oposto da intenção aparente.** Um projeto publicado
-> como portfólio técnico, sem licença, não pode ser legalmente reaproveitado por
-> ninguém — inclusive por quem quisesse apenas estudar e adaptar um trecho.
+- organização inicial em `app`, `auth`, `error`, `models`, `routes` e `repository`;
+- estruturas `App` e `AppState` e o método `App::start`;
+- rota `/assets`;
+- handlers `list_assets`, `create_asset` e `update_asset`;
+- estruturas `CreateAssetRequest` e `UpdateAssetRequest`;
+- modelo `Asset` com `id`, `name` e `unit_value`;
+- autenticação administrativa por extrator `Admin`;
+- erro `AssetDoesNotExist`;
+- uso inicial de `f64` para valores monetários.
 
-**Situação verificada:** repositório público em
-`github.com/ESousa97/wallet-live`, 36 commits, autor único (`esousa97`).
+## 5. Evolução substancial posterior
 
-## 2. Análise de titularidade
+Depois desse ponto de partida, o projeto recebeu evolução substancial, incluindo
+valores monetários com `Decimal`, holdings materializados, livro-razão, compra e
+venda, custo médio, autenticação avançada, refresh token rotativo, CSRF, lockout,
+integrações externas, observabilidade, testes, internacionalização e documentação
+arquitetural.
 
-### 2.1 Os termos da DIO — **verificado**
+## 6. Distinção entre código-base e contribuições próprias
 
-Consulta aos [Termos de Uso da DIO](https://www.dio.me/terms) em 2026-07-30. As duas
-cláusulas relevantes:
+O autor detém os direitos sobre suas contribuições originais. A possibilidade de
+licenciar o repositório inteiro depende também dos direitos aplicáveis ao código-base
+preexistente.
 
-**Cláusula 2.1 — sobre o conteúdo do usuário ("Suas Informações"):**
+A classificação documental adequada para o conjunto é:
 
-> "Nós não clamamos propriedade de suas **Informações** nem das trocas de mensagens
-> realizadas por você."
+> Projeto derivado e substancialmente transformado, contendo extensa contribuição
+> autoral própria.
 
-**Cláusula 11.1 — sobre o que a DIO reivindica:**
+O repositório não é uma mera cópia do projeto didático, pois seu comportamento,
+modelo de dados, segurança, integrações e documentação foram ampliados de forma
+substancial. Ao mesmo tempo, o histórico inicial documenta elementos derivados do
+upstream; por isso, o projeto não deve ser descrito como implementação integralmente
+independente.
 
-> "Todos os direitos autorais do **Conteúdo** e da **Plataforma** (incluindo, mas não
-> se limitando a imagens, fotografias, animações, vídeos, áudio, música, texto, layout
-> e look and feel incorporados na **Plataforma**) são de propriedade da **DIO**."
+## 7. Termos da DIO
 
-A distinção está na **definição de "Conteúdo"** (cláusula 3.6):
+Os Termos de Uso da DIO distinguem informações ou conteúdo original do usuário do
+conteúdo e da plataforma mantidos pela DIO. Essa distinção não torna a DIO
+automaticamente proprietária de todo código original escrito pelo participante.
 
-> "instruções ao vivo e/ou gravadas, tutorial e serviços de aprendizagem através de
-> aulas, projetos, desafios, exercícios e atividades on-line"
+Ela também não autoriza o participante a sublicenciar código preexistente fornecido
+pela própria DIO. A propriedade sobre contribuições originais e a autorização para
+usar, modificar, distribuir ou sublicenciar o upstream são questões diferentes.
 
-**"Conteúdo" é o material didático produzido pela DIO** — as aulas, o enunciado do
-desafio, o material do bootcamp. A palavra "projetos" nessa definição designa *o
-projeto proposto como exercício*, não a implementação escrita pelo aluno.
+Assim, a declaração da DIO de que não reivindica automaticamente a propriedade das
+informações do usuário não resolve, sozinha, a proveniência ou o relicenciamento dos
+componentes derivados do projeto-base.
 
-Além disso, **não há cláusula de cessão ou de licença** sobre obras criadas pelo
-usuário — nenhuma concessão do tipo "licença não exclusiva, irrevogável, isenta de
-royalties" que plataformas frequentemente incluem.
+## 8. Cláusula 10.1 do edital Santander Bootcamp 2026
 
-### 2.2 Os editais Santander/DIO — **verificado parcialmente**
+O edital não transfere expressamente à DIO ou ao Santander a titularidade integral do
+software criado pelo participante. Entretanto, a cláusula 10.1 concede autorização
+ampla de uso de textos, comentários, ideias e outros materiais submetidos ao processo
+para as finalidades previstas no programa.
 
-Os editais de bootcamps patrocinados são documentos de **processo seletivo**:
-apresentação do programa, público-alvo, período de inscrição, critérios de seleção,
-cronograma e suporte.
+Essa autorização não constitui uma licença *open source* para o público e não resolve
+o direito de sublicenciamento do código-base.
 
-**Não contêm cláusula de propriedade intelectual, direitos autorais sobre código ou
-cessão de direitos sobre trabalhos dos participantes.**
+## 9. Restrições relacionadas a marcas e conteúdo exclusivo
 
-> **Ressalva de verificação:** um dos editais examinados usa fontes CID e não permitiu
-> extração de texto. A conclusão acima vale para os editais efetivamente lidos.
+O edital também contém restrições relativas ao uso das marcas Santander e DIO e à
+divulgação de conteúdo exclusivo de aulas, avaliações e materiais internos. Por isso,
+marcas, logotipos e materiais exclusivos não devem ser incorporados ao repositório
+sem autorização.
 
-### 2.3 Resumo da titularidade
+## 10. Repositório público não significa open source
 
-| Fator | Estado | Conclusão |
-| --- | --- | --- |
-| Autoria | 36 commits, autor único | Obra de autor único |
-| **Termos da DIO** | **Verificado** | **A DIO não reivindica propriedade sobre o código do aluno** |
-| **Editais Santander** | **Verificado (parcial)** | **Não tratam de propriedade intelectual** |
-| Termo específico do bootcamp | **Não verificado** | A cláusula 1.11 prevê que "cada Bootcamp terá os seus termos e condições específicos" — vale conferir o que foi aceito na inscrição |
-| **Vínculo empregatício** | **Não verificável a partir do repositório** | Só o autor pode confirmar |
-| Código de terceiro | htmx (0BSD) + dependências | Ver §4 |
-| Marcas | "DIO" e "Santander" citados | Uso nominativo — ver §2.4 |
-| Dados de cliente / segredos comerciais | Nenhum | Sem restrição |
+Um repositório público não é automaticamente *open source*. A visibilidade pública e
+o botão de *fork* decorrem dos recursos e termos da plataforma, mas não equivalem a
+uma autorização geral de sublicenciamento.
 
-**A titularidade do código é do autor.** O que reforça essa conclusão, além dos termos:
-o projeto se afasta deliberadamente da versão didática em praticamente todas as
-decisões relevantes — `Decimal` em vez de ponto flutuante, `holdings` + livro-razão em
-vez de log append-only, refresh token rotativo, CSP fechada, camada de serviço,
-observabilidade. É obra autoral independente, não a entrega de um exercício.
+Na ausência de licença expressa, os direitos autorais permanecem reservados. Um
+terceiro não deve inferir permissão para redistribuir o projeto sob MIT, Apache-2.0 ou
+qualquer outra licença apenas porque o código pode ser visualizado ou bifurcado no
+GitHub.
 
-### 2.4 Sobre as marcas citadas
+## 11. Dependências como segunda camada da análise
 
-O projeto menciona "DIO" e "Santander" ao descrever sua origem acadêmica. Isso é uso
-nominativo — descrever de onde o projeto veio — e não sugere endosso. Recomenda-se
-**não** usar logotipos e **não** dar a entender patrocínio ou aprovação.
+A auditoria das dependências com `cargo-license` e `cargo-deny` continua necessária,
+mas é independente e posterior à análise de proveniência do código principal. Ela não
+é o único ponto pendente.
 
-### 2.5 O que ainda recomenda cautela
-
-Dois pontos permanecem, ambos de baixa probabilidade:
-
-1. **Termo específico do bootcamp** (cláusula 1.11). Os editais examinados não tratam
-   de PI, mas o termo aceito na inscrição do bootcamp de Rust não foi localizado.
-2. **Contexto de emprego.** Se o código foi escrito com equipamento, tempo ou em
-   função de vínculo empregatício, a titularidade pode ser afetada — independentemente
-   da DIO.
-
-## 3. Natureza do projeto
-
-Fatores que orientam a escolha:
-
-| Fator | Situação |
-| --- | --- |
-| Repositório | **Público** |
-| Finalidade | Educacional e de portfólio técnico |
-| Uso comercial esperado | Nenhum, atualmente |
-| Distribuição de binários | Nenhuma; imagem Docker construída localmente |
-| Contribuições externas | Nenhuma até hoje |
-| Modelo de negócio | Nenhum |
-| Dados de terceiros | Nenhum |
-| Patentes | Nenhuma envolvida |
-
-## 4. Compatibilidade com as dependências
-
-### O que é verificável
-
-| Item | Licença | Situação |
-| --- | --- | --- |
-| **htmx 2.0.8** (vendorado em `static/htmx.js`) | **0BSD** | Permissiva; **não exige atribuição**. Compatível com qualquer licença |
-| **Tailwind CSS CLI** | MIT | Usado só em **build-time**; o CSS gerado é obra derivada dos próprios templates. Não é redistribuído |
-| 392 crates Rust | **Requer verificação** | Ver abaixo |
-
-### O que **não** foi verificado
-
-> **Não foi possível verificar as licenças das 392 dependências neste ambiente.** As
-> dependências não estão em cache local e `cargo metadata --offline` falha. **Nenhuma
-> afirmação sobre elas é feita aqui sem verificação.**
-
-O ecossistema Rust é predominantemente **MIT OR Apache-2.0**, e os crates usados são
-amplamente adotados — mas isso é expectativa, não verificação.
-
-**Esta verificação é pré-requisito da decisão:**
+As verificações recomendadas são:
 
 ```bash
-cargo install cargo-license && cargo license --tsv > licencas.tsv
+cargo install cargo-license
+cargo license --tsv
 ```
 
 ```bash
-cargo install cargo-deny && cargo deny check licenses
+cargo install cargo-deny
+cargo deny check licenses
 ```
 
-O que procurar no resultado:
+Os resultados devem ser revisados quanto a licenças incompatíveis, obrigações de
+atribuição, copyleft e dependências sem licença declarada. Um resultado compatível
+nessa auditoria não resolve, por si só, a autorização sobre o upstream.
 
-| Achado | Implicação |
-| --- | --- |
-| Só MIT / Apache-2.0 / BSD / ISC / Unicode | **Nenhuma restrição** — qualquer licença desta análise serve |
-| Alguma **GPL** ou **AGPL** | **Restringe severamente**: obrigaria o projeto a adotar licença compatível |
-| Alguma **LGPL** | Restringe se houver vinculação estática (que é o caso em Rust) |
-| Alguma **MPL 2.0** | Copyleft de arquivo; compatível, mas exige atenção |
-| Licença **não declarada** | Investigar individualmente |
+## 12. Pendências atuais
 
-## 5. Matriz comparativa
-
-| Licença | Uso comercial | Modificação | Redistribuição | Copyleft | Patentes | Adequação a este projeto |
-| --- | :---: | :---: | :---: | :---: | :---: | --- |
-| **MIT** | Sim | Sim | Sim | Não | **Não** | **Muito boa** — a mais simples e reconhecida; ideal para portfólio |
-| **Apache-2.0** | Sim | Sim | Sim | Não | **Sim** (concessão expressa) | **Muito boa** — MIT + proteção de patente e exigência de aviso de mudanças |
-| **BSD 3-Clause** | Sim | Sim | Sim | Não | Não | Boa — equivalente à MIT, com cláusula de não endosso |
-| **MPL 2.0** | Sim | Sim | Sim | **Por arquivo** | Sim | Adequada se houver intenção de manter modificações abertas sem afetar quem apenas integra |
-| **LGPLv3** | Sim | Sim | Sim | **Fraco** | Sim | **Inadequada** — em Rust a vinculação é estática, o que torna as obrigações onerosas |
-| **GPLv3** | Sim | Sim | Sim | **Forte** | Sim | Inadequada ao objetivo de portfólio: obriga derivados a adotarem a mesma licença |
-| **AGPLv3** | Sim | Sim | Sim | **Forte + rede** | Sim | Inadequada — estenderia o copyleft a quem apenas **executasse** o serviço |
-| **Proprietária** | Controlado | Não | Não | — | — | Adequada apenas se houver intenção comercial |
-| **Sem licença** (atual) | **Não** | **Não** | **Não** | — | — | **Inadequada** — contradiz a publicação como portfólio |
-
-### Por que AGPL merece uma nota
-
-O AGPLv3 estende as obrigações de copyleft a quem executa o software **como serviço em
-rede**. Como este projeto **é** uma aplicação web, adotá-lo significaria que qualquer
-pessoa que o hospedasse teria de disponibilizar o código-fonte, incluindo suas
-modificações. É um efeito forte, e **quase certamente indesejado** para um projeto de
-portfólio.
-
-## 6. Recomendação técnica
-
-**Titularidade verificada (§2): a DIO não reivindica propriedade sobre o código do
-aluno.** Resta apenas a verificação das licenças das dependências (§4), que é rápida e
-tem alta probabilidade de não trazer impedimento.
-
-### Recomendação principal: **MIT**
-
-| Motivo | Detalhe |
-| --- | --- |
-| Objetivo é portfólio | Demonstrar competência técnica; a licença deve **maximizar** a possibilidade de leitura e reaproveitamento |
-| Simplicidade | ~170 palavras; compreendida sem consulta jurídica |
-| Reconhecimento | A licença mais usada do ecossistema Rust — expectativa alinhada |
-| Compatibilidade | Compatível com tudo, inclusive com projetos GPL |
-| Sem obrigação prática | Só exige preservar o aviso de copyright |
-
-### Alternativa: **Apache-2.0**
-
-Preferível se houver qualquer preocupação com patentes ou com uso corporativo:
-
-| Vantagem sobre a MIT | Detalhe |
-| --- | --- |
-| **Concessão expressa de patente** | Contribuidores concedem licença de patente; há cláusula de retaliação |
-| Exigência de aviso de modificação | Rastreabilidade de derivados |
-| Preferência corporativa | Muitas organizações a preferem por segurança jurídica |
-
-Custo: texto mais longo (~10× a MIT) e exigência de arquivo `NOTICE`.
-
-> **Convenção do ecossistema Rust:** a maioria dos projetos usa **licenciamento duplo
-> `MIT OR Apache-2.0`**, deixando a escolha com quem usa. É a opção mais idiomática
-> para um projeto Rust, e vale ser considerada.
-
-### O que **não** recomendar aqui
-
-| Opção | Por quê |
-| --- | --- |
-| **Permanecer sem licença** | Contradiz a publicação. Torna o código legalmente inutilizável |
-| GPLv3 / AGPLv3 | Copyleft forte, desalinhado com portfólio |
-| LGPLv3 | Vinculação estática do Rust torna as obrigações onerosas |
-| Proprietária | Sem modelo de negócio que a justifique |
-
-## 7. Passos para decidir
-
-| # | Passo | Estado |
+| Questão | Estado | Tratamento necessário |
 | --- | --- | --- |
-| 1 | Confirmar que a DIO não reivindica titularidade | ✅ **Feito** — §2.1 |
-| 2 | Confirmar que os editais não tratam de PI | ✅ **Feito (parcial)** — §2.2 |
-| 3 | Conferir se o bootcamp teve termo específico (cláusula 1.11) | ⬜ Recomendado, baixa probabilidade de alterar a conclusão |
-| 4 | Confirmar ausência de vínculo empregatício sobre o código | ⬜ Só o autor pode |
-| 5 | **Verificar as licenças das dependências** com `cargo license` ou `cargo deny` | ⬜ **Único bloqueante técnico restante** |
-| 6 | Decidir entre MIT, Apache-2.0 ou o duplo `MIT OR Apache-2.0` | ⬜ |
-| 7 | Criar o arquivo `LICENSE` com o texto oficial e o ano/titular corretos | ⬜ |
-| 8 | Declarar no `Cargo.toml`: `license = "MIT"` (ou o que for escolhido) | ⬜ |
-| 9 | Referenciar a licença no `README.md` | ⬜ |
-| 10 | Se aceitar contribuições, definir como elas são licenciadas (o padrão implícito da Apache-2.0 resolve; a MIT não trata do assunto) | ⬜ |
+| Autorização ou reescrita do código-base | **Pendente** | Obter autorização expressa da DIO ou substituir os trechos derivados por implementação independente |
+| Termo específico do bootcamp | **Pendente** | Localizar e revisar os termos aceitos na inscrição |
+| Licenças das dependências | **Pendente** | Executar e revisar `cargo-license` e `cargo-deny` |
+| Vínculo empregatício | **Confirmação exclusiva do autor** | Verificar se alguma relação contratual afeta contribuições originais |
+| Marcas e materiais DIO/Santander | **Uso restrito** | Não incorporar marcas, logotipos ou conteúdo exclusivo sem autorização |
 
-O passo 5 é rápido e independente dos demais:
+Permanecem, portanto, duas frentes independentes: a proveniência e autorização do
+código-base e a compatibilidade das licenças das dependências.
 
-```bash
-cargo install cargo-license && cargo license --tsv > licencas.tsv
-```
+## 13. Opções futuras
 
-Se o resultado trouxer apenas licenças permissivas — que é a expectativa para esta
-árvore de dependências —, **não há impedimento restante** para adotar MIT ou
-Apache-2.0.
+1. **Manter o repositório sem licença.** Preserva o estado de direitos reservados
+   enquanto as pendências são investigadas.
+2. **Solicitar autorização formal à DIO.** A autorização deve cobrir uso,
+   modificação, distribuição e, se pretendido, sublicenciamento do código-base.
+3. **Reescrever os componentes derivados.** A substituição deve ser independente e
+   documentada, sem copiar expressão protegida do upstream.
+4. **Separar uma implementação nova e independente.** Uma nova base pode facilitar a
+   delimitação de proveniência, desde que a independência seja real e auditável.
+5. **Consultar profissional jurídico.** Recomendado antes de exploração comercial
+   relevante ou quando os documentos disponíveis não forem suficientes.
 
-### Se a decisão for MIT
+## 14. Recomendação atual: manter sem LICENSE
 
-Criar `LICENSE` com o texto oficial (obtido de <https://opensource.org/license/mit>),
-substituindo ano e titular. Depois:
+Até a resolução da proveniência, recomenda-se:
 
-```toml
-[package]
-name = "wallet"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
-```
+- manter o projeto sem arquivo `LICENSE`;
+- não adicionar o campo `license` ao `Cargo.toml`;
+- não apresentar o repositório como *open source*;
+- preservar o histórico Git;
+- registrar corretamente sua origem acadêmica e derivada;
+- executar a auditoria das licenças das dependências;
+- solicitar confirmação escrita à DIO sobre os direitos de uso, modificação,
+  distribuição e sublicenciamento do código-base;
+- considerar a reescrita dos componentes derivados caso a autorização não seja
+  obtida.
 
-## 8. Por que este documento não cria o arquivo `LICENSE`
+Não há base documental suficiente, neste momento, para aplicar MIT, Apache-2.0 ou
+`MIT OR Apache-2.0` ao repositório inteiro.
 
-Adicionar uma licença é um **ato de disposição de direitos**, com efeito jurídico real
-e praticamente irreversível: uma vez publicada sob licença permissiva, qualquer cópia
-obtida naquele momento permanece legitimamente licenciada, mesmo que a licença seja
-alterada depois.
+## 15. Critérios futuros para escolha de licença
 
-A escolha entre MIT, Apache-2.0 e o duplo licenciamento é uma decisão do titular sobre
-os próprios direitos — não uma conclusão técnica que esta análise possa tomar por ele.
-Some-se a isso a verificação de dependências ainda pendente (§4).
+Uma licença para o repositório inteiro somente deve ser escolhida depois que a
+proveniência e a autorização do código-base estiverem resolvidas e a compatibilidade
+das dependências tiver sido auditada.
 
-> **Histórico desta seção.** Uma versão anterior deste documento classificava a
-> titularidade como **bloqueante não resolvida**, sem ter consultado os termos da DIO.
-> Era cautela apresentada como achado — o que é pior do que a ausência de pesquisa,
-> por sugerir um risco identificado onde havia apenas ausência de verificação. A
-> consulta foi feita (§2.1, §2.2) e a conclusão é que **a DIO não reivindica
-> propriedade sobre o código do aluno**.
+Nesse cenário futuro:
 
-## 9. Estado de cada afirmação
+- MIT pode ser avaliada pela simplicidade;
+- Apache-2.0 pode ser avaliada pela concessão expressa de patentes;
+- `MIT OR Apache-2.0` pode ser considerada pela convenção do ecossistema Rust.
 
-| Afirmação | Estado |
-| --- | --- |
-| Não há arquivo de licença no repositório | **Verificado** |
-| O `Cargo.toml` não declara `license` | **Verificado** |
-| O repositório é público | **Verificado** |
-| Autor único nos 36 commits | **Verificado** |
-| htmx é 0BSD | **Verificado** (conhecimento público do projeto htmx) |
-| **A DIO não reivindica propriedade sobre o conteúdo do usuário** | **Verificado** — cláusula 2.1 dos Termos de Uso |
-| **"Conteúdo" nos termos = material didático da DIO** | **Verificado** — cláusula 3.6 |
-| **Não há cláusula de cessão sobre obras do usuário** | **Verificado** — ausência nos Termos de Uso |
-| **Editais Santander não tratam de PI** | **Verificado parcialmente** — um edital não permitiu extração de texto |
-| Termo específico do bootcamp de Rust | **Não localizado** — cláusula 1.11 prevê que possa existir |
-| Ausência de vínculo empregatício sobre o código | **Não verificável a partir do repositório** |
-| Licenças das 392 dependências | **Requer validação** — único bloqueante técnico |
+Essas são opções de avaliação futura, não licenças atualmente autorizadas para o
+projeto.
 
-## 10. Evidências
+## Evidências e limites da análise
 
 ```text
-- (ausência de) LICENSE, LICENSE.md, COPYING
-- Cargo.toml            (sem campo license)
-- git log               (36 commits, autor único)
-- git remote -v         (github.com/ESousa97/wallet-live — público)
-- static/htmx.js        (htmx 2.0.8, 0BSD)
-- docs/delivery/course-delivery.md (contexto do bootcamp)
-
-Fontes externas consultadas em 2026-07-30:
-- https://www.dio.me/terms   (cláusulas 2.1, 3.6, 11.1, 11.4, 1.11)
-- Editais de seleção Santander Open Academy / DIO
-  (assets.santanderopenacademy.com — sem cláusula de PI)
+- ausência de LICENSE, LICENSE.md e COPYING
+- Cargo.toml sem campo license
+- histórico Git e primeiro commit do wallet-live
+- upstream digitalinnovationone/rust-fullstack-carteira-investimentos
+- evolução posterior registrada no código, migrations, testes e documentação
+- Termos de Uso da DIO
+- edital Santander Bootcamp 2026, inclusive cláusula 10.1
 ```
+
+Esta análise deve ser atualizada se surgir autorização escrita da DIO, termo
+específico do bootcamp, reescrita dos componentes derivados ou inventário conclusivo
+das licenças das dependências.

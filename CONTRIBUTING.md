@@ -2,14 +2,18 @@
 
 ## Antes de começar
 
-> **Aviso sobre licenciamento.** Este repositório **ainda não tem licença definida**,
-> o que torna juridicamente ambíguo como uma contribuição seria licenciada. A
-> titularidade do código já foi verificada (é do autor); falta escolher e publicar a
-> licença. Ver [docs/decisions/licensing.md](docs/decisions/licensing.md). Se pretende
-> contribuir com código, vale abrir uma issue antes para resolver esse ponto.
+> **Aviso sobre licenciamento.** Este repositório ainda não possui licença definitiva.
+> Contribuições podem ser discutidas e avaliadas, mas a ausência de licença gera
+> incerteza sobre sua redistribuição. Nenhuma contribuição será tratada
+> automaticamente como MIT, Apache-2.0 ou licenciada de forma implícita. O modelo de
+> licenciamento das contribuições será definido somente depois de resolvidas a
+> proveniência e a autorização do código-base. Antes de contribuir com código, abra
+> uma issue para alinhar o escopo. Consulte
+> [docs/decisions/licensing.md](docs/decisions/licensing.md).
 
-Este é um projeto de **autor único**, originado do bootcamp Santander 2026 — Rust AI
-Developer (DIO). Contribuições são bem-vindas, e este documento descreve o processo
+Este projeto é atualmente mantido por um único autor e tem origem derivada no
+bootcamp Santander 2026 — Rust AI Developer (DIO), conforme documentado na análise de
+licenciamento. Contribuições são bem-vindas, e este documento descreve o processo
 real, não um processo corporativo que não existe.
 
 ## Preparar o ambiente

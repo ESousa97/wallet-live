@@ -26,9 +26,9 @@ projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   de dados, modelo de ameaças, runbooks e matriz de testes por risco.
 - `CONTRIBUTING.md`, `SECURITY.md` e este `CHANGELOG.md`.
 - Registro consolidado de débitos técnicos (24 itens) e limitações conhecidas.
-- Análise de licenciamento, com matriz comparativa e recomendação fundamentada.
-  Titularidade verificada contra os Termos de Uso da DIO e os editais Santander/DIO:
-  **nenhum dos dois reivindica propriedade sobre o código do aluno**.
+- Análise de licenciamento e proveniência do código-base, distinguindo as
+  contribuições autorais próprias dos componentes derivados do projeto didático da
+  DIO.
 
 ### Alterado
 
@@ -42,6 +42,9 @@ projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Corrigido
 
+- Corrigida a análise de licenciamento para registrar a origem derivada do projeto, a
+  cláusula 10.1 do edital Santander Bootcamp 2026 e a necessidade de resolver a
+  autorização do código-base antes da adoção de uma licença *open source*.
 - Contagem de variantes de `AppError` na documentação de arquitetura: eram descritas
   17, o enum tem 21.
 
