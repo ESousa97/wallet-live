@@ -55,7 +55,7 @@ Registradas aqui para que a ausência seja visível em vez de silenciosa:
 | Escolha do PostgreSQL | [../architecture/technology-decisions.md](../architecture/technology-decisions.md) §10 | Motivo histórico não registrado; a análise disponível não sustenta um ADR honesto sem inventar deliberação |
 | Manter `BIGSERIAL` em vez de UUIDv7 | [../decisions/roadmap.md](../decisions/roadmap.md), Fase 3 | **Esta é a decisão mais próxima de merecer um ADR** — tem contexto, alternativa avaliada e critério de revisão explícito. Recomenda-se promovê-la a ADR-0013 |
 | Estratégia de testes em duas camadas | [../testing/test-strategy.md](../testing/test-strategy.md) | Documentada em profundidade no lugar próprio; um ADR duplicaria |
-| Licenciamento | [../decisions/licensing.md](../decisions/licensing.md) | **Decisão ainda não tomada** — depende de confirmação de titularidade |
+| Licenciamento | [../decisions/licensing.md](../decisions/licensing.md) | **Decisão ainda não tomada** — depende da resolução da proveniência e da autorização do código-base, além da auditoria das licenças das dependências |
 
 ## Formato
 

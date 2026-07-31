@@ -54,9 +54,10 @@ arquitetural.
 
 ## 6. Distinção entre código-base e contribuições próprias
 
-O autor detém os direitos sobre suas contribuições originais. A possibilidade de
-licenciar o repositório inteiro depende também dos direitos aplicáveis ao código-base
-preexistente.
+Em princípio, o autor detém os direitos sobre suas contribuições originais,
+ressalvadas eventual cessão de direitos, situação de coautoria ou relação contratual
+que disponha de forma diferente. A possibilidade de licenciar o repositório inteiro
+depende também dos direitos aplicáveis ao código-base preexistente.
 
 A classificação documental adequada para o conjunto é:
 
@@ -143,8 +144,10 @@ nessa auditoria não resolve, por si só, a autorização sobre o upstream.
 | Vínculo empregatício | **Confirmação exclusiva do autor** | Verificar se alguma relação contratual afeta contribuições originais |
 | Marcas e materiais DIO/Santander | **Uso restrito** | Não incorporar marcas, logotipos ou conteúdo exclusivo sem autorização |
 
-Permanecem, portanto, duas frentes independentes: a proveniência e autorização do
-código-base e a compatibilidade das licenças das dependências.
+Entre as pendências atuais, existem duas frentes técnicas centrais: a proveniência e
+a autorização do código-base e a compatibilidade das licenças das dependências. Elas
+não afastam as verificações adicionais relacionadas ao termo específico do bootcamp,
+ao eventual vínculo contratual e ao uso de marcas ou materiais exclusivos.
 
 ## 13. Opções futuras
 
