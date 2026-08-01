@@ -8,7 +8,7 @@ código.
 
 ## Escopo
 
-Coberto: as 12 variáveis que o sistema lê. Não coberto: instalação (ver
+Coberto: as 13 variáveis que o sistema lê. Não coberto: instalação (ver
 [installation.md](installation.md)) e gestão de segredos em produção (ver
 [../security/secrets-management.md](../security/secrets-management.md)).
 
@@ -314,7 +314,7 @@ JWT_SECRET: ci-jwt-secret
 ```text
 - src/config.rs   · Config, from_env, required, optional_positive, optional_non_negative
 - src/app.rs      · init_tracing (LOG_FORMAT), init_otel (OTEL_*), App::start
-- .env.example    (as 12 variáveis, com comentários)
+- .env.example    (as 13 variáveis, com comentários)
 - docker-compose.yaml       (serviço app)
 - Dockerfile                (ENV BIND_ADDR=0.0.0.0:3000)
 - .github/workflows/ci.yml  (as três obrigatórias no job test)

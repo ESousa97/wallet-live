@@ -147,7 +147,7 @@ Três variáveis são **obrigatórias** — o serviço não sobe sem elas:
 | `ADMIN_SECRET_KEY` | Credencial da API administrativa |
 | `JWT_SECRET` | Chave de assinatura das sessões |
 
-Outras nove têm padrão sensato. Referência completa, com efeito e risco de cada uma:
+Outras dez têm padrão sensato. Referência completa, com efeito e risco de cada uma:
 [configuration.md](docs/getting-started/configuration.md).
 
 > ⚠️ **Em produção, use exatamente `COOKIE_SECURE=true`.** A comparação é literal:

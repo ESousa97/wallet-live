@@ -20,7 +20,7 @@ no topo, e cita os arquivos e símbolos do código que sustentam suas afirmaçõ
 | Documento | Conteúdo |
 | --- | --- |
 | [installation.md](getting-started/installation.md) | Requisitos, instalação, primeira execução, estrutura do repositório |
-| [configuration.md](getting-started/configuration.md) | As 12 variáveis de ambiente, efeito, risco e onde são lidas |
+| [configuration.md](getting-started/configuration.md) | As 13 variáveis de ambiente, efeito, risco e onde são lidas |
 | [troubleshooting.md](getting-started/troubleshooting.md) | Problemas conhecidos de build, banco, Docker e interface |
 
 ## Arquitetura
