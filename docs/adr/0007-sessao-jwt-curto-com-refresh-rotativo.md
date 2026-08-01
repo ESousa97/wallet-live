@@ -6,9 +6,8 @@ Aceita. Substitui a sessão inicial de JWT único e longo, sem revogação.
 
 ## Contexto
 
-A sessão inicial era um JWT assinado em cookie, com validade longa. O material do
-curso registrava isso como simplificação didática — o próprio instrutor apontou a
-ausência de refresh como limitação.
+A sessão inicial era um JWT assinado em cookie, com validade longa — uma
+simplificação adequada a um protótipo, mas não a um fluxo de sessão real.
 
 O problema estrutural de um JWT puro é que ele **não é revogável**. A validação não
 consulta o banco (é isso que o torna rápido), e a consequência é que um token

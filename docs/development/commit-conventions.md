@@ -19,16 +19,10 @@ O repositório **já segue** Conventional Commits desde o primeiro commit, mas a
 convenção nunca esteve documentada. Este documento registra a prática existente em
 vez de propor uma nova.
 
-Distribuição real dos 36 commits:
-
-| Tipo | Commits | Uso |
-| --- | ---: | --- |
-| `feat:` | 23 | Funcionalidade nova |
-| `docs:` | 5 | Só documentação |
-| `refactor:` | 3 | Reestruturação sem mudança de comportamento |
-| `ci:` | 2 | Pipeline |
-| `perf!:` | 1 | Desempenho, **com quebra** |
-| `fix:` | 1 | Correção de defeito |
+O histórico utiliza principalmente os tipos `feat`, `fix`, `perf`, `refactor`, `docs`,
+`test`, `ci` e `chore`. Como a distribuição muda a cada novo commit, este documento não
+mantém uma contagem estática. A convenção registrada aqui foi **inferida do próprio
+histórico**, não imposta a ele.
 
 ### Formato
 
@@ -92,7 +86,7 @@ reconstruída. Um corpo útil responde:
 | Releases publicados | Nenhum |
 | Versão da API (OpenAPI) | `1.0.0` |
 
-> **A versão `0.1.0` nunca foi incrementada**, apesar de 36 commits com mudanças
+> **A versão permanece `0.1.0` desde o primeiro commit**, apesar de várias mudanças
 > substanciais — inclusive uma quebra explícita (`perf!`). Registrado como débito
 > técnico.
 
@@ -139,7 +133,7 @@ foi feito; um changelog registra **o que mudou para quem usa**.
 
 | `git log` | `CHANGELOG.md` |
 | --- | --- |
-| 36 entradas | Agrupado por versão |
+| Uma entrada por commit | Agrupado por versão |
 | Ordem cronológica | Agrupado por natureza da mudança |
 | Inclui `docs:`, `ci:`, `refactor:` | Só o que afeta quem usa ou opera |
 | Escrito para o autor | Escrito para o leitor |
@@ -225,7 +219,7 @@ de estilo em runtime.
 
 | # | Débito | Impacto |
 | --- | --- | --- |
-| 1 | Versão nunca incrementada (`0.1.0` em 36 commits) | Não há como referenciar uma versão específica |
+| 1 | Versão nunca incrementada (`0.1.0` desde o primeiro commit) | Não há como referenciar uma versão específica |
 | 2 | Sem tags | Não há ponto de retorno identificável |
 | 3 | `CHANGELOG.md` criado retroativamente | As entradas históricas são reconstruções, não registros contemporâneos |
 | 4 | Sem política de descontinuação da API | Ver [ADR-0011](../adr/0011-versionamento-da-api-por-caminho.md) |
@@ -235,7 +229,7 @@ Consolidados em [../decisions/technical-debt.md](../decisions/technical-debt.md)
 ## 8. Evidências
 
 ```text
-- git log                    (36 commits, todos em Conventional Commits)
+- git log                    (histórico integralmente em Conventional Commits)
 - Cargo.toml                 (version = "0.1.0")
 - src/routes/api.rs          · ApiDoc (info.version = "1.0.0")
 - src/routes/snapshots/      (contrato congelado por insta)

@@ -239,9 +239,15 @@ registrado como débito técnico, não como roadmap.
 
 ## Contribuindo
 
-[CONTRIBUTING.md](CONTRIBUTING.md). Especialmente bem-vindas: as correções de
-prioridade alta em [technical-debt.md](docs/decisions/technical-debt.md) — três delas
-são de baixo esforço.
+Relatos de defeitos, sugestões, revisão técnica e discussões por meio de issues são
+bem-vindos.
+
+Enquanto a proveniência e o modelo de licenciamento do projeto não estiverem
+resolvidos, pull requests contendo código de terceiros não serão incorporados ao
+repositório.
+
+Consulte [CONTRIBUTING.md](CONTRIBUTING.md) e
+[licensing.md](docs/decisions/licensing.md).
 
 ## Licença
 

@@ -9,7 +9,7 @@ Aceita.
 O projeto é o trabalho final do bootcamp **Santander 2026 — Rust AI Developer**
 (DIO). A linguagem, portanto, **não foi uma escolha livre**: era premissa do
 contexto. Evidência: [../delivery/course-delivery.md](../delivery/course-delivery.md)
-e [../aprendizado/](../aprendizado/).
+e [../aprendizado/README.md](../aprendizado/README.md).
 
 Há, no entanto, uma decisão real dentro dessa premissa: **como estruturar o crate**.
 O projeto começou com tudo em `src/main.rs`. Um binário Rust não pode ser importado
@@ -100,7 +100,7 @@ domínio financeiro:
 
 | Risco | Impacto | Mitigação atual |
 | --- | --- | --- |
-| Manutenção futura sem familiaridade em Rust | Alto — projeto fica parado | Densidade alta de comentários explicativos no código; documentação em `docs/aprendizado/` |
+| Manutenção futura sem familiaridade em Rust | Alto — projeto fica parado | Densidade alta de comentários explicativos no código; documentação em `docs/architecture/` e `docs/adr/` |
 | Superfície pública ampliada pelo alvo de biblioteca | Baixo | Uso de `pub(crate)` onde possível (`User::new`, `from_auth_token`) |
 | Dependência de crates de nicho abandonados | Médio | `cargo audit` no CI |
 

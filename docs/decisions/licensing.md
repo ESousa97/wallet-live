@@ -29,6 +29,14 @@ O projeto teve origem no desafio didático da DIO associado ao repositório:
 
 <https://github.com/digitalinnovationone/rust-fullstack-carteira-investimentos>
 
+A versão inicial do `wallet-live` continuou a implementação construída no módulo final
+do curso, preservando parte de sua estrutura, nomenclatura, rotas, modelos e decisões
+técnicas. O sistema foi posteriormente ampliado e transformado de maneira substancial.
+
+Não se trata, portanto, de coincidência conceitual nem de inspiração genérica: o ponto
+de partida foi código-base preexistente, e as correspondências abaixo são
+identificáveis no histórico.
+
 ## 4. Correspondências verificadas no histórico inicial
 
 O histórico inicial do `wallet-live` contém correspondências identificáveis com esse
@@ -86,13 +94,27 @@ componentes derivados do projeto-base.
 
 ## 8. Cláusula 10.1 do edital Santander Bootcamp 2026
 
-O edital não transfere expressamente à DIO ou ao Santander a titularidade integral do
-software criado pelo participante. Entretanto, a cláusula 10.1 concede autorização
-ampla de uso de textos, comentários, ideias e outros materiais submetidos ao processo
-para as finalidades previstas no programa.
+A redação literal da cláusula 10.1 refere-se a fotografias, comentários, informações,
+textos, vídeos, feedback, ideias criativas, sugestões e outros materiais submetidos ao
+Processo de Seleção como parte da inscrição.
 
-Essa autorização não constitui uma licença *open source* para o público e não resolve
-o direito de sublicenciamento do código-base.
+A cláusula concede ao Santander e à DIO autorização gratuita, irrevogável e
+irretratável para as utilizações promocionais descritas no edital, pelo prazo de dois
+anos, empregando também expressões relacionadas a exclusividade, cessão e
+sublicenciamento. O edital preserva a possibilidade de manutenção histórica de
+materiais já utilizados.
+
+O texto não identifica expressamente código-fonte entregue posteriormente durante a
+fase educacional do bootcamp. Portanto, não é possível afirmar apenas com base nessa
+cláusula que o repositório do projeto esteja incluído ou excluído de seu alcance.
+
+Essa autorização:
+
+- não constitui licença *open source* para o público;
+- não concede ao participante direito de sublicenciar código-base da DIO;
+- não transfere expressamente a titularidade integral do software;
+- não resolve a proveniência dos componentes derivados;
+- deve ser interpretada dentro das finalidades e do contexto descritos no edital.
 
 ## 9. Restrições relacionadas a marcas e conteúdo exclusivo
 
@@ -195,6 +217,37 @@ Nesse cenário futuro:
 Essas são opções de avaliação futura, não licenças atualmente autorizadas para o
 projeto.
 
+## 16. Fontes documentais consultadas
+
+As fontes abaixo sustentam as afirmações deste documento. Nenhuma delas é reproduzida
+aqui em trechos extensos — apenas os pontos relevantes são resumidos.
+
+| Fonte | Versão ou data | Pontos relevantes |
+| --- | --- | --- |
+| Termos de Uso da DIO | Atualizados em 05/09/2025; consultados em 31/07/2026 | Informações do usuário, definição de Conteúdo, restrições de reprodução e direitos da plataforma |
+| Edital Santander Bootcamp 2026 — Rust AI Developer | Edital do programa consultado pelo autor | Cláusulas 5.22, 8.4, 10.1, 10.4–10.7 e 12.10 |
+| Repositório-base da DIO (`digitalinnovationone/rust-fullstack-carteira-investimentos`) | Estado público consultado na data da análise | Estrutura e código-base sem licença *open source* expressa identificada |
+| Histórico Git do `wallet-live` | Do primeiro commit até a branch atual | Proveniência inicial e evolução posterior |
+
+Limites desta seção: não foi obtida manifestação escrita da DIO ou do Santander sobre
+o caso concreto, e nenhuma das fontes acima decide, isoladamente, a questão do
+sublicenciamento do código-base.
+
+## 17. Ferramentas de IA no desenvolvimento
+
+Ferramentas de IA foram utilizadas como apoio ao desenvolvimento, incluindo pesquisa,
+geração assistida, revisão, refatoração, testes e documentação.
+
+As decisões de produto, seleção das sugestões, integração, revisão e validação
+permaneceram sob responsabilidade do mantenedor humano.
+
+Referências a ferramentas de IA ou trailers `Co-Authored-By` no histórico Git
+registram assistência técnica e não constituem, por si só, conclusão jurídica sobre
+autoria, coautoria ou titularidade.
+
+O registro dos aprendizados associados a esse processo está em
+[../aprendizado/README.md](../aprendizado/README.md).
+
 ## Evidências e limites da análise
 
 ```text
@@ -205,6 +258,7 @@ projeto.
 - evolução posterior registrada no código, migrations, testes e documentação
 - Termos de Uso da DIO
 - edital Santander Bootcamp 2026, inclusive cláusula 10.1
+- uso de ferramentas de IA como apoio, registrado na seção 17
 ```
 
 Esta análise deve ser atualizada se surgir autorização escrita da DIO, termo

@@ -7,7 +7,7 @@ política de atualização e o tratamento de vulnerabilidades conhecidas.
 
 ## Escopo
 
-Coberto: as 27 dependências diretas, a árvore transitiva em números, auditoria e
+Coberto: as 30 dependências diretas, a árvore transitiva em números, auditoria e
 política de atualização. Não coberto: a justificativa arquitetural de cada tecnologia
 (ver [../architecture/technology-decisions.md](../architecture/technology-decisions.md))
 e licenciamento do projeto (ver [../decisions/licensing.md](../decisions/licensing.md)).
@@ -18,11 +18,16 @@ e licenciamento do projeto (ver [../decisions/licensing.md](../decisions/licensi
 
 | Métrica | Valor |
 | --- | ---: |
-| Dependências diretas (runtime) | 25 |
-| Dependências de desenvolvimento | 4 |
+| Dependências diretas em `[dependencies]` | 26 |
+| Dependências diretas em `[dev-dependencies]` | 4 |
+| **Total de dependências diretas** | **30** |
 | **Pacotes na árvore completa** (`Cargo.lock`) | **392** |
 | Dependências JavaScript no build | **0** |
 | Dependências de CDN em runtime | **0** |
+
+> **As contagens correspondem ao `Cargo.toml` na data da última revisão deste documento
+> e devem ser atualizadas sempre que uma dependência direta for adicionada ou
+> removida.** Última revisão: 2026-07-31.
 
 > **A ausência de cadeia npm é uma propriedade deliberada** — não um detalhe. O CSS é
 > compilado por um executável standalone e o htmx é vendorado, então o build não herda
@@ -230,7 +235,7 @@ Consolidados em [../decisions/technical-debt.md](../decisions/technical-debt.md)
 ## 10. Evidências
 
 ```text
-- Cargo.toml               (25 diretas + 4 de desenvolvimento, com features)
+- Cargo.toml               (26 em [dependencies] + 4 em [dev-dependencies], com features)
 - Cargo.lock               (392 pacotes)
 - .cargo/audit.toml        (RUSTSEC-2023-0071, com justificativa)
 - .github/workflows/ci.yml (job audit; download do Tailwind v4.3.3)

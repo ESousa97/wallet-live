@@ -19,8 +19,8 @@ negociável num sistema financeiro:
    e o rust-analyzer passa a acusar o arquivo inteiro em vermelho (`os error
    10061`).
 
-O material do curso apresentou também Diesel como alternativa (módulo M16), o que
-torna esta uma escolha deliberada, não default.
+Diesel foi considerado como alternativa, o que torna esta uma escolha deliberada, não
+default.
 
 ## Restrições
 
@@ -36,13 +36,12 @@ torna esta uma escolha deliberada, não default.
 
 ## Opções consideradas
 
-**Avaliadas de fato** (comparação documentada em
-[../aprendizado/08-persistencia-e-orm.md](../aprendizado/08-persistencia-e-orm.md)):
+**Avaliadas de fato:**
 
 1. **sqlx** com macros verificadas em compilação — decisão adotada.
-2. **Diesel** — ORM com DSL própria, apresentado no curso.
-3. **Armazenamento em JSON/arquivo** — apresentado no curso e descartado por
-   ausência de transação e constraint.
+2. **Diesel** — ORM com DSL própria.
+3. **Armazenamento em JSON/arquivo** — descartado por ausência de transação e
+   constraint.
 
 **Comparação *post hoc***: SeaORM, `tokio-postgres` puro.
 

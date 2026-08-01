@@ -2,19 +2,29 @@
 
 ## Antes de começar
 
-> **Aviso sobre licenciamento.** Este repositório ainda não possui licença definitiva.
-> Contribuições podem ser discutidas e avaliadas, mas a ausência de licença gera
-> incerteza sobre sua redistribuição. Nenhuma contribuição será tratada
-> automaticamente como MIT, Apache-2.0 ou licenciada de forma implícita. O modelo de
-> licenciamento das contribuições será definido somente depois de resolvidas a
-> proveniência e a autorização do código-base. Antes de contribuir com código, abra
-> uma issue para alinhar o escopo. Consulte
-> [docs/decisions/licensing.md](docs/decisions/licensing.md).
+> **Estado temporário das contribuições.** Este repositório ainda não possui licença
+> definitiva. Issues, relatos de defeitos, revisão técnica e propostas de arquitetura
+> podem ser enviados normalmente. Entretanto, pull requests contendo código de
+> terceiros não serão incorporados enquanto a proveniência e o modelo de licenciamento
+> do projeto não estiverem resolvidos.
+>
+> Nenhuma contribuição será considerada automaticamente licenciada sob MIT,
+> Apache-2.0 ou qualquer outra licença. O fluxo técnico descrito abaixo permanece
+> documentado para uso futuro.
+
+Em resumo, no estado atual:
+
+- **aceito:** issues, relatos de defeitos, discussão técnica e propostas de
+  implementação ou de arquitetura;
+- **não incorporado:** pull request contendo código de terceiros;
+- **não concedida:** qualquer licença implícita sobre o que for enviado;
+- **não adotada:** MIT, Apache-2.0 ou qualquer outra licença, automaticamente.
 
 Este projeto é atualmente mantido por um único autor e tem origem derivada no
-bootcamp Santander 2026 — Rust AI Developer (DIO), conforme documentado na análise de
-licenciamento. Contribuições são bem-vindas, e este documento descreve o processo
-real, não um processo corporativo que não existe.
+bootcamp Santander 2026 — Rust AI Developer (DIO), conforme documentado em
+[docs/decisions/licensing.md](docs/decisions/licensing.md). O restante deste documento
+descreve o processo técnico real — e permanece como referência para quando o modelo de
+licenciamento estiver definido.
 
 ## Preparar o ambiente
 
@@ -40,7 +50,12 @@ cargo run
 Detalhes em
 [docs/getting-started/installation.md](docs/getting-started/installation.md).
 
-## Fluxo de contribuição
+## Fluxo de contribuição — referência futura
+
+> **Este fluxo não está ativo.** O processo abaixo permanece documentado para uso
+> futuro. Enquanto o modelo de licenciamento não estiver definido, pull requests
+> contendo código de terceiros não serão incorporados. Hoje, apenas o passo 1
+> (abrir uma issue) tem efeito prático.
 
 1. **Abra uma issue** antes de mudanças significativas, para alinhar a abordagem.
 2. **Crie um branch:**
@@ -55,11 +70,12 @@ Detalhes em
 5. **Documente** o teste em
    [docs/testing/test-catalogue.md](docs/testing/test-catalogue.md).
 6. **Verifique** com a lista da próxima seção.
-7. **Abra o pull request**, explicando *o quê* e *por quê*.
+7. **Abra o pull request**, explicando *o quê* e *por quê* — passo suspenso, ver o
+   aviso acima.
 
 O CI roda automaticamente nos quatro jobs: `lint`, `test`, `audit` e `docker`.
 
-## Antes de abrir o PR
+## Verificação local — referência futura
 
 ```bash
 cargo fmt --all
@@ -187,11 +203,13 @@ Use o formato de [docs/adr/README.md](docs/adr/README.md), com o próximo númer
 
 Não abra ADR para detalhe trivial.
 
-## O que é especialmente bem-vindo
+## Onde a discussão técnica é mais útil
 
-Os débitos técnicos de **prioridade alta**, que são de baixo esforço e alto retorno:
+Os débitos técnicos de **prioridade alta** são os pontos em que uma issue com
+diagnóstico ou proposta de abordagem ajuda mais. A implementação em si permanece a
+cargo do mantenedor enquanto o licenciamento não estiver resolvido.
 
-| ID | Contribuição | Esforço |
+| ID | Assunto | Esforço estimado |
 | --- | --- | --- |
 | **DT-04** | Corrigir o parsing de `COOKIE_SECURE` (aceitar `true`/`1`/`yes`, sem distinção de caixa) | **Baixo** |
 | **DT-07** | Exigir comprimento mínimo e recusar valores de exemplo nos segredos | **Baixo** |

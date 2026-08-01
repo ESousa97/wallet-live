@@ -44,10 +44,10 @@ segundo plano e acesso a banco — não há segunda linguagem no servidor.
 ### Motivação técnica
 
 **Motivo confirmado** para a escolha do bootcamp (o projeto é o trabalho final de
-um curso de Rust — evidência: `docs/delivery/course-delivery.md`,
-`docs/aprendizado/`). Isso torna a linguagem uma **restrição de contexto**, não
-uma escolha livre — e é importante registrar isso com honestidade em vez de
-inventar uma comparação que não aconteceu.
+um curso de Rust — evidência: `docs/delivery/course-delivery.md`). Isso torna a
+linguagem uma **restrição de contexto**, não uma escolha livre — e é importante
+registrar isso com honestidade em vez de inventar uma comparação que não
+aconteceu.
 
 **Justificativa inferida** de por que a restrição se mostrou adequada ao domínio:
 
@@ -114,8 +114,8 @@ frontend, 2 de API × 2 prefixos, 3 sondas, 3 camadas de middleware.
 ### Motivação técnica
 
 **Motivo confirmado.** O repositório documenta explicitamente a comparação com
-Rocket, que era o framework "principal" do curso — evidência:
-`docs/aprendizado/09-frameworks-web-rocket-vs-axum.md`, e um comentário em
+Rocket, o framework web apresentado no curso — evidência:
+[ADR-0002](../adr/0002-axum-em-vez-de-rocket.md), e um comentário em
 `src/app.rs` contrasta os modelos de autenticação.
 
 O argumento central é o **modelo de extratores**: o handler declara nos parâmetros
@@ -157,7 +157,7 @@ span da requisição, justamente as camadas que ninguém confere à mão.
 - src/app.rs            · App::router (ordem das camadas, com o porquê comentado)
 - src/auth/admin.rs     · impl FromRequestParts for Admin
 - tests/common/mod.rs   (tower::oneshot sobre App::router)
-- docs/aprendizado/09-frameworks-web-rocket-vs-axum.md
+- docs/adr/0002-axum-em-vez-de-rocket.md
 ```
 
 ### Quando reavaliar
@@ -314,7 +314,8 @@ e o `#[sqlx::test]`, que cria um banco efêmero por teste.
 ### Motivação técnica
 
 **Motivo confirmado** para preferir SQL explícito a um ORM — evidência:
-`docs/aprendizado/08-persistencia-e-orm.md`, que discute a alternativa Diesel.
+[ADR-0006](../adr/0006-sqlx-com-checagem-em-compilacao.md), que discute a
+alternativa Diesel.
 
 **Justificativa inferida** do ganho concreto: a verificação em compilação transforma
 uma classe inteira de erro de runtime em erro de build. Coluna renomeada, tipo
@@ -800,6 +801,6 @@ O que deveria ganhar registro formal e ainda não tem:
 - styles/app.css, static/htmx.js
 - migrations/20260613000000_money_to_numeric.up.sql
 - migrations/20260722000000_normalize_money_scales.up.sql
-- docs/aprendizado/08-persistencia-e-orm.md
-- docs/aprendizado/09-frameworks-web-rocket-vs-axum.md
+- docs/adr/0002-axum-em-vez-de-rocket.md
+- docs/adr/0006-sqlx-com-checagem-em-compilacao.md
 ```

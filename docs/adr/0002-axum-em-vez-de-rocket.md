@@ -6,9 +6,8 @@ Aceita.
 
 ## Contexto
 
-O bootcamp ensinou **Rocket** como framework web principal (módulo M17), mas o
-próprio módulo de Projeto Final usou axum. O projeto precisava escolher entre
-seguir o framework das aulas teóricas ou o do projeto de referência.
+O bootcamp apresentou **Rocket** como framework web principal, mas a implementação
+que originou este projeto usava axum. O projeto precisava escolher entre os dois.
 
 O requisito que decidiu a questão é específico deste domínio: o sistema tem rotas
 com **três níveis distintos de acesso** — públicas (`/login`, `/healthz`, assets),
@@ -28,14 +27,13 @@ apenas sem exigir sessão.
 
 ## Opções consideradas
 
-**Avaliadas de fato**, com comparação documentada em
-[../aprendizado/09-frameworks-web-rocket-vs-axum.md](../aprendizado/09-frameworks-web-rocket-vs-axum.md):
+**Avaliadas de fato:**
 
-1. **Rocket** — framework das aulas. Macros de rota (`#[get("/path")]`),
+1. **Rocket** — framework apresentado no curso. Macros de rota (`#[get("/path")]`),
    ergonomia inicial melhor, autenticação tipicamente por *fairing* (middleware
    global).
-2. **axum** — usado no módulo de Projeto Final. Extratores como parâmetros de
-   handler, construído sobre `tower`.
+2. **axum** — usado na implementação que originou o projeto. Extratores como
+   parâmetros de handler, construído sobre `tower`.
 
 **Comparação *post hoc***: actix-web, warp, hyper puro.
 
@@ -113,7 +111,6 @@ oferece:
 - src/auth/user.rs            · impl FromRequestParts for User e Option<User>
 - src/routes/frontend.rs      · SessionUser, HxRequest
 - tests/common/mod.rs         (tower::oneshot sobre App::router)
-- docs/aprendizado/09-frameworks-web-rocket-vs-axum.md
 ```
 
 ## Critérios de revisão

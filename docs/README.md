@@ -107,7 +107,7 @@ Ver também [../SECURITY.md](../SECURITY.md) para divulgação de vulnerabilidad
 | [development-environment.md](development/development-environment.md) | Ciclo diário e artefatos a regenerar |
 | [coding-standards.md](development/coding-standards.md) | Convenções e os invariantes que **nenhuma ferramenta verifica** |
 | [commit-conventions.md](development/commit-conventions.md) | Conventional Commits, SemVer, release |
-| [dependency-management.md](development/dependency-management.md) | As 27 dependências diretas, auditoria, atualização |
+| [dependency-management.md](development/dependency-management.md) | As 30 dependências diretas, auditoria, atualização |
 
 ## Decisões e estado do projeto
 
@@ -122,8 +122,8 @@ Ver também [../SECURITY.md](../SECURITY.md) para divulgação de vulnerabilidad
 
 | Documento | Conteúdo |
 | --- | --- |
-| [course-delivery.md](delivery/course-delivery.md) | Matriz de requisitos do bootcamp e roteiro de demonstração |
-| [aprendizado/](aprendizado/) | Aula do curso → decisão do projeto → motivo (12 documentos) |
+| [course-delivery.md](delivery/course-delivery.md) | Matriz de requisitos da entrega e roteiro de demonstração |
+| [aprendizado/README.md](aprendizado/README.md) | Aprendizados técnicos aplicados ao projeto, sem reproduzir conteúdo didático |
 
 ---
 

@@ -2,23 +2,35 @@
 
 ## Objetivo
 
-Documento de **avaliação acadêmica**: relaciona os requisitos do projeto final do
-bootcamp à evidência correspondente no repositório, registra o que foi feito além
-do escopo didático e descreve um roteiro curto de demonstração.
+Documento de **registro da entrega técnica**: relaciona os requisitos considerados na
+entrega à evidência correspondente no repositório, registra o que foi feito além do
+escopo inicial e descreve um roteiro curto de demonstração.
 
 ## Escopo
 
 Este é o único documento com finalidade acadêmica. Ele não descreve arquitetura,
-contratos nem operação — para isso, ver [../README.md](../README.md). A ligação
-entre cada aula do curso e a decisão técnica correspondente fica em
-[../aprendizado/](../aprendizado/).
+contratos nem operação — para isso, ver [../README.md](../README.md). Os aprendizados
+técnicos aplicados ao projeto ficam em
+[../aprendizado/README.md](../aprendizado/README.md).
+
+Este documento não reproduz o conteúdo didático do curso: não descreve aulas, não cita
+material exclusivo e não reconstrói o que foi ministrado.
+
+## Origem acadêmica
+
+Este projeto foi desenvolvido como evolução do projeto final apresentado no Santander
+Bootcamp 2026 — Rust AI Developer. A matriz abaixo relaciona os requisitos técnicos
+considerados na entrega às evidências existentes no repositório, sem reproduzir o
+conteúdo didático do curso.
+
+A análise de proveniência e licenciamento está em
+[../decisions/licensing.md](../decisions/licensing.md).
 
 ## Resumo
 
-`wallet-live` é a carteira digital de investimentos proposta no projeto final
-do Santander 2026 — Rust AI Developer. Backend, regras financeiras e HTML
-renderizado no servidor são escritos em Rust. A aplicação mantém o escopo
-central do curso e acrescenta acabamento de produto sem virar uma SPA ou um
+`wallet-live` é uma carteira digital de investimentos. Backend, regras financeiras e
+HTML renderizado no servidor são escritos em Rust. A aplicação mantém o escopo central
+proposto na entrega e acrescenta acabamento de produto sem virar uma SPA ou um
 conjunto de microserviços.
 
 Stack principal: **Axum + Tokio + SQLx/PostgreSQL + Askama + JWT/cookies**.
@@ -26,9 +38,14 @@ Stack principal: **Axum + Tokio + SQLx/PostgreSQL + Askama + JWT/cookies**.
 > Esta é uma simulação educacional. Não movimenta dinheiro real e não oferece
 > recomendação de investimento.
 
-## Matriz de aderência ao curso
+## Matriz de requisitos da entrega
 
-| Requisito das aulas finais | Evidência no projeto | Status |
+A matriz abaixo organiza os requisitos técnicos **considerados pelo autor** para a
+entrega e aponta suas evidências no repositório. Ela não reproduz a ementa, as aulas,
+as avaliações ou os materiais internos do bootcamp, e não deve ser lida como
+transcrição fiel de requisitos oficiais do curso.
+
+| Requisito técnico | Evidência no projeto | Status |
 | --- | --- | --- |
 | Aplicação full-stack em Rust | Axum, Askama e um único binário | ✅ |
 | API REST de ativos | `GET/POST/PATCH /api/assets` e `/api/v1/assets` | ✅ |
@@ -49,7 +66,7 @@ Stack principal: **Axum + Tokio + SQLx/PostgreSQL + Askama + JWT/cookies**.
 | Execução reproduzível | `.env.example`, Docker Compose, Dockerfile e CI | ✅ |
 | IA como apoio, não como feature artificial | nenhuma integração com LLM no produto | ✅ |
 
-## Melhorias deliberadas sobre a versão didática
+## Melhorias deliberadas sobre a base inicial
 
 - `Decimal/NUMERIC` substitui ponto flutuante no núcleo financeiro.
 - Compra, venda e depósito são transacionais e validam escala, saldo e posição.
@@ -110,6 +127,6 @@ Stack principal: **Axum + Tokio + SQLx/PostgreSQL + Askama + JWT/cookies**.
 - Nenhum segredo real versionado.
 - Arquivos novos do mercado incluídos no commit da entrega.
 
-Não há, nas transcrições do curso, exigência formal de deploy público. A
-entrega é reproduzível localmente e está preparada para container; publicar é
-uma decisão posterior de infraestrutura, não uma dependência para avaliação.
+Deploy público não foi tratado como requisito desta entrega. O projeto é
+reproduzível localmente e está preparado para container; publicar é uma decisão
+posterior de infraestrutura, não uma dependência para a validação técnica.

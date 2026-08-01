@@ -9,9 +9,10 @@ projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 > histórico de commits, dos comentários de migração e do código. As entradas anteriores
 > a 2026-07-30 são reconstruções, não registros contemporâneos.
 >
-> **A versão nunca foi incrementada** desde o primeiro commit: `Cargo.toml` marca
-> `0.1.0` ao longo de 36 commits, e não há tags no repositório. Por isso as mudanças
-> abaixo estão agrupadas pelas **cinco fases de desenvolvimento** documentadas em
+> **A versão nunca foi incrementada:** `Cargo.toml` marca `0.1.0` desde o primeiro
+> commit, apesar de sucessivas mudanças substanciais, e não há tags no repositório.
+> Por isso as mudanças abaixo estão agrupadas pelas **cinco fases de
+> desenvolvimento** documentadas em
 > [docs/decisions/roadmap.md](docs/decisions/roadmap.md), não por versões publicadas.
 > Registrado como **DT-17** em
 > [docs/decisions/technical-debt.md](docs/decisions/technical-debt.md).

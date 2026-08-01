@@ -1,11 +1,10 @@
 # Arquitetura do wallet-live
 
 Este documento explica **como o sistema é montado, etapa por etapa, e por
-que cada peça existe** — extraído inteiramente do código-fonte atual (não do
-material didático; para a ligação com o curso, ver
-[docs/aprendizado/](../aprendizado/)). Cada seção cita o arquivo e o símbolo
-(função, tipo, constante ou teste) que sustenta a afirmação — não o número da
-linha, que muda a cada commit sem avisar.
+que cada peça existe** — extraído inteiramente do código-fonte atual. Cada
+seção cita o arquivo e o símbolo (função, tipo, constante ou teste) que
+sustenta a afirmação — não o número da linha, que muda a cada commit sem
+avisar.
 
 ## Escopo
 
@@ -106,8 +105,8 @@ que precisa (`State<AppState>`, `User`, `Repository`, `PortfolioService`,
 Se um extrator falha (ex.: `User` sem cookie válido), o handler **nunca
 executa** — a proteção de uma rota é visível na sua assinatura, não numa
 lista de exceções em outro lugar (contraste explícito com o middleware
-global de autenticação do framework Rocket, documentado em
-[docs/aprendizado/09-frameworks-web-rocket-vs-axum.md](../aprendizado/09-frameworks-web-rocket-vs-axum.md)).
+global de autenticação típico do Rocket, registrado em
+[ADR-0002](../adr/0002-axum-em-vez-de-rocket.md)).
 
 ## 3. As camadas: routes → services → repository → banco
 
