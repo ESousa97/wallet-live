@@ -1,0 +1,2 @@
+# Os checksums do SQLx dependem dos bytes exatos das migrations.
+migrations/*.sql text eol=lf
