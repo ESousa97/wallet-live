@@ -58,6 +58,16 @@ backup automatizado. Ver [known-limitations.md](docs/decisions/known-limitations
 
 ## Arquitetura em uma tela
 
+![Diagrama animado da arquitetura: uma requisição entra pelo navegador, atravessa os
+middlewares request_tracing, security_headers e refresh_session, chega às rotas,
+passa por services/portfolio e repository e alcança as seis tabelas do PostgreSQL;
+em paralelo, os jobs quotes e market consomem Coinbase e CoinGecko](docs/assets/arquitetura-fluxo.gif)
+
+*Um `POST /buy` atravessando a pilha, as seis consultas concorrentes que montam a
+`WalletView` e os dois jobs de segundo plano. Âmbar lastreia preço e chega ao banco;
+violeta é informativo e morre em memória — a separação é a do
+[ADR-0009](docs/adr/0009-snapshot-de-mercado-em-memoria.md).*
+
 ```text
 routes/     HTTP puro: formulário/JSON, CSRF, redirect, fragmento vs página
    ↓

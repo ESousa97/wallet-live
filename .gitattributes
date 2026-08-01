@@ -1,2 +1,6 @@
 # Os checksums do SQLx dependem dos bytes exatos das migrations.
 migrations/*.sql text eol=lf
+
+# Assets da documentação: binários, nunca normalizados.
+*.gif binary
+*.png binary

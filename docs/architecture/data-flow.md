@@ -16,6 +16,20 @@ individual de cada componente (ver
 
 ---
 
+![Diagrama animado da arquitetura: uma requisição entra pelo navegador, atravessa os
+middlewares request_tracing, security_headers e refresh_session, chega às rotas, passa
+por services/portfolio e repository e alcança as seis tabelas do PostgreSQL; em
+paralelo, os jobs quotes e market consomem Coinbase e CoinGecko](../assets/arquitetura-fluxo.gif)
+
+**Leitura.** O laço percorre em 7,7 s o que as seções seguintes detalham paradas: as
+três camadas na ordem em que são aplicadas e os caminhos que contornam a camada de
+serviço (§2), a compra até o `COMMIT` e as seis consultas concorrentes que montam a
+`WalletView` (§3), e as duas integrações externas com destinos diferentes (§1) — âmbar
+chega ao banco, violeta termina em memória. Como todo desenho deste documento, ele
+**resume**: o texto de cada seção é o que sustenta a afirmação.
+
+---
+
 ## 1. Diagrama de contexto
 
 Quem interage com o sistema e por qual fronteira.
