@@ -29,7 +29,7 @@ licenciamento estiver definido.
 ## Preparar o ambiente
 
 ```bash
-git clone https://github.com/ESousa97/wallet-live.git && cd wallet-live
+git clone https://github.com/enoquesousa/wallet-live.git && cd wallet-live
 ```
 
 ```bash

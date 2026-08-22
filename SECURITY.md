@@ -26,7 +26,7 @@ Como não existem versões publicadas, correções são aplicadas ao ramo princi
 Use um destes canais:
 
 1. **GitHub Security Advisories** (preferido) — em
-   <https://github.com/ESousa97/wallet-live/security/advisories/new>. Permite discussão
+   <https://github.com/enoquesousa/wallet-live/security/advisories/new>. Permite discussão
    privada e coordenação da divulgação.
 2. **Contato direto com o autor** pelo perfil do GitHub, caso o canal acima não esteja
    disponível.
