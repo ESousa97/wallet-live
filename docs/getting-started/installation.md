@@ -36,7 +36,7 @@ de queries. O cache versionado permite compilar sem ele e sem banco.
 ### 2.1 Clonar
 
 ```bash
-git clone https://github.com/ESousa97/wallet-live.git
+git clone https://github.com/enoquesousa/wallet-live.git
 ```
 
 ```bash

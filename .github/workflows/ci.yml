@@ -86,7 +86,11 @@ jobs:
       - name: instala cargo-audit
         run: cargo install cargo-audit --locked
       - name: auditoria de dependências (RustSec)
-        run: cargo audit
+        # rkyv 0.7.46 is only optional lockfile metadata from rust_decimal;
+        # `cargo tree --all-features -i rkyv@0.7.46` confirms it is not built.
+        # Keep the exception scoped so every other current or future advisory
+        # still fails this job.
+        run: cargo audit --ignore RUSTSEC-2026-0235
 
   docker:
     runs-on: ubuntu-latest
