@@ -241,7 +241,7 @@ A expectativa qualitativa, por módulo:
 ## 10. Responsabilidades
 
 Projeto de autor único: todos os papéis são do mesmo responsável
-(`esousa97`). Declarado explicitamente para não sugerir uma estrutura que não existe.
+([`enoquesousa`](https://github.com/enoquesousa)). Declarado explicitamente para não sugerir uma estrutura que não existe.
 
 | Papel | Responsabilidade |
 | --- | --- |
